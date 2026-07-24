@@ -1,0 +1,5 @@
+.firebase/
+node_modules/
+firebase-debug.log
+serviceAccount*.json
+backup_registro_raee_*.json

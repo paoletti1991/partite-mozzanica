@@ -1,0 +1,10 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "registroMozzanica": {
+      ".read": "auth != null && auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1'",
+      ".write": "auth != null && auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1'"
+    }
+  }
+}
