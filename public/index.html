@@ -907,11 +907,19 @@ function documentoIngressoLabel(p){
 }
 function documentiClienteFatturati(p){
   if(!p) return [];
-  return Object.values(DB.documenti).filter(d=>
-    d.valorizzazione && naturaValorizzazione(d)==='ricavo' && (+d.valorizzazione.valoreRiconosciuto||0)>0 &&
-    d.fatturaCliente && String(d.fatturaCliente.numero||'').trim() &&
-    (d.righe||[]).some(r=>r.partitaId===p.id)
-  );
+
+  return Object.values(DB.documenti).filter(d=>{
+    const eco=documentoEconomicsData(d);
+
+    return (
+      eco.valorizzazione &&
+      naturaValorizzazione(d)==='ricavo' &&
+      (+eco.valorizzazione.valoreRiconosciuto||0)>0 &&
+      eco.fatturaCliente &&
+      String(eco.fatturaCliente.numero||'').trim() &&
+      (d.righe||[]).some(r=>r.partitaId===p.id)
+    );
+  });
 }
 function quotaClienteKey(d,r,index){ return r.id||`${d.id}|${index}|${r.partitaId}|${r.lotto||'tq'}`; }
 function quoteClienteFatturate(p){
@@ -923,36 +931,114 @@ function quoteClienteFatturate(p){
   return out;
 }
 function quoteDaDefinireConFornitore(p){
-  if(!p || !(p.fattureAcquisto||[]).some(f=>Number.isFinite(+f.importo)&&+f.importo>0)) return [];
+  if(!p) return [];
+
+  const ecoPartita=partitaEconomicsData(p);
+
+  if(!(ecoPartita.fattureAcquisto||[])
+    .some(f=>Number.isFinite(+f.importo)&&+f.importo>0)){
+    return [];
+  }
+
   const out=[];
+
   Object.values(DB.documenti).forEach(d=>{
     if(uscitaValorizzata(d)) return;
+
     (d.righe||[]).forEach((r,index)=>{
-      if(r.partitaId===p.id) out.push({key:quotaClienteKey(d,r,index),d,r,kg:+r.kg||0});
+      if(r.partitaId===p.id){
+        out.push({
+          key:quotaClienteKey(d,r,index),
+          d,
+          r,
+          kg:+r.kg||0
+        });
+      }
     });
   });
+
   return out;
 }
 function partitaDaDefinireConFornitore(p){
   return !!p && (+p.kgIngresso||0)>0 && quoteDaDefinireConFornitore(p).length>0;
 }
 function fattureClienteLabel(p){
-  return [...new Set(documentiClienteFatturati(p).map(d=>d.fatturaCliente.numero))].join(', ');
+  return [
+    ...new Set(
+      documentiClienteFatturati(p)
+        .map(d=>documentoEconomicsData(d).fatturaCliente?.numero)
+        .filter(Boolean)
+    )
+  ].join(', ');
 }
+
 function fattureAcquistoValorizzateLabel(p){
-  return [...new Set((p.fattureAcquisto||[]).filter(f=>(+f.importo||0)>0).map(f=>f.numero).filter(Boolean))].join(', ')||'fattura d’acquisto valorizzata';
+  const eco=partitaEconomicsData(p);
+
+  return [
+    ...new Set(
+      (eco.fattureAcquisto||[])
+        .filter(f=>(+f.importo||0)>0)
+        .map(f=>f.numero)
+        .filter(Boolean)
+    )
+  ].join(', ') || 'fattura d’acquisto valorizzata';
 }
 
 /* valorizzazione proporzionale di un documento:
    quota_i = V * (kg_i * €/kg_ingresso_i) / Σ(kg*€/kg). Fallback: kg-proporzionale */
 function ripartizioneDoc(d){
-  const importo = d.valorizzazione? Math.abs(+d.valorizzazione.valoreRiconosciuto||0) : 0;
-  const V = naturaValorizzazione(d)==='costo' ? -importo : importo;
-  const righe = (d.righe||[]).map(r=>{
-    const p = DB.partite[r.partitaId];
-    const ekgI = p? eurokgIngresso(p) : null;
-    return {r, p, kg:+r.kg||0, ekgI, base:(+r.kg||0)*(ekgI||0)};
+  const eco=documentoEconomicsData(d);
+
+  const importo=eco.valorizzazione
+    ? Math.abs(+eco.valorizzazione.valoreRiconosciuto||0)
+    : 0;
+
+  const V=naturaValorizzazione(d)==='costo'
+    ? -importo
+    : importo;
+
+  const righe=(d.righe||[]).map(r=>{
+    const p=DB.partite[r.partitaId];
+    const ekgI=p ? eurokgIngresso(p) : null;
+
+    return {
+      r,
+      p,
+      kg:+r.kg||0,
+      ekgI,
+      base:(+r.kg||0)*(ekgI||0)
+    };
   });
+
+  const totBase=righe.reduce((s,x)=>s+x.base,0);
+  const totKg=righe.reduce((s,x)=>s+x.kg,0);
+
+  const fallbackKg=
+    totBase===0 ||
+    righe.some(x=>x.ekgI==null);
+
+  righe.forEach(x=>{
+    if(!V){
+      x.quota=0;
+      return;
+    }
+
+    if(fallbackKg){
+      x.quota=totKg ? V*x.kg/totKg : 0;
+    }else{
+      x.quota=totBase ? V*x.base/totBase : 0;
+    }
+  });
+
+  return {
+    V,
+    righe,
+    totBase,
+    totKg,
+    fallbackKg
+  };
+}
   const totBase = righe.reduce((s,x)=>s+x.base,0);
   const totKg = righe.reduce((s,x)=>s+x.kg,0);
   const fallbackKg = totBase===0 || righe.some(x=>x.ekgI==null); // finché manca un prezzo, ripartizione coerente a peso
@@ -966,22 +1052,51 @@ function ripartizioneDoc(d){
 
 /* aggregati per partita */
 function partitaEconomics(p){
-  let ricavo=0, trasportoUscita=0;
+  let ricavo=0;
+  let trasportoUscita=0;
+
   Object.values(DB.documenti).forEach(d=>{
-    const rip = ripartizioneDoc(d);
-    const costoTrasp = d.trasportoInterno? 0 : (+ (d.trasportoCosto)||0);
-    const totKgDoc = rip.totKg;
+    const rip=ripartizioneDoc(d);
+    const ecoDoc=documentoEconomicsData(d);
+
+    const costoTrasp=d.trasportoInterno
+      ? 0
+      : (+ecoDoc.trasportoCosto||0);
+
+    const totKgDoc=rip.totKg;
+
     rip.righe.forEach(x=>{
       if(x.r.partitaId===p.id){
-        ricavo += x.quota;
-        if(totKgDoc>0) trasportoUscita += costoTrasp * (x.kg/totKgDoc);
+        ricavo+=x.quota;
+
+        if(totKgDoc>0){
+          trasportoUscita+=costoTrasp*(x.kg/totKgDoc);
+        }
       }
     });
   });
-  const acquisto = costoAcquisto(p);
-  const traspIng = p.trasportoIngresso? (+p.trasportoIngresso.importo||0) : 0;
-  const utile = ricavo - acquisto - traspIng - trasportoUscita;
-  return {ricavo, acquisto, traspIng, trasportoUscita, utile};
+
+  const ecoPartita=partitaEconomicsData(p);
+
+  const acquisto=costoAcquisto(p);
+
+  const traspIng=ecoPartita.trasportoIngresso
+    ? (+ecoPartita.trasportoIngresso.importo||0)
+    : 0;
+
+  const utile=
+    ricavo -
+    acquisto -
+    traspIng -
+    trasportoUscita;
+
+  return {
+    ricavo,
+    acquisto,
+    traspIng,
+    trasportoUscita,
+    utile
+  };
 }
 
 /* aggregati annuali */
