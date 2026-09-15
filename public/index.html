@@ -518,7 +518,15 @@ window.addEventListener('firebase-bridge-ready',e=>{
 });
 window.addEventListener('online',()=>{if(CLOUD.user)pushCloud();});
 function uid(p){ return (p||'id')+'_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+function isAdmin(){
+  return CLOUD.profile?.active===true && CLOUD.profile?.role==='admin';
+}
 
+function hasPermission(section,action='read'){
+  if(isAdmin()) return true;
+  if(!CLOUD.profile || CLOUD.profile.active!==true) return false;
+  return CLOUD.profile.permissions?.[section]?.[action]===true;
+}
 /* progressivo N-Raee per anno */
 function nextNum(year){
   const list = Object.values(DB.partite).filter(p=>p.anno===year);
