@@ -795,15 +795,32 @@ function cerDesc(code){ const c=cerByCode[code]; return c? c.desc : ''; }
 
 /* €/kg d'ingresso della partita = Σ fatture acquisto / kg ingresso */
 function eurokgIngresso(p){
-  const fatture=(p.fattureAcquisto||[]).reduce((s,f)=>s+(+f.importo||0),0);
-  if(fatture>0 && p.kgIngresso) return fatture/p.kgIngresso;
-  const defs=p.definizioniFornitore||[];
-  const tot=defs.reduce((s,d)=>s+(+d.importo||0),0), kgDef=defs.reduce((s,d)=>s+(+d.kg||0),0);
-  return defs.length&&kgDef>0?tot/kgDef:null;
+  const eco=partitaEconomicsData(p);
+
+  const fatture=(eco.fattureAcquisto||[])
+    .reduce((s,f)=>s+(+f.importo||0),0);
+
+  if(fatture>0 && p.kgIngresso){
+    return fatture/p.kgIngresso;
+  }
+
+  const defs=eco.definizioniFornitore||[];
+  const tot=defs.reduce((s,d)=>s+(+d.importo||0),0);
+  const kgDef=defs.reduce((s,d)=>s+(+d.kg||0),0);
+
+  return defs.length&&kgDef>0 ? tot/kgDef : null;
 }
+
 function costoAcquisto(p){
-  const fatture=(p.fattureAcquisto||[]).reduce((s,f)=>s+(+f.importo||0),0);
-  return fatture>0?fatture:(p.definizioniFornitore||[]).reduce((s,d)=>s+(+d.importo||0),0);
+  const eco=partitaEconomicsData(p);
+
+  const fatture=(eco.fattureAcquisto||[])
+    .reduce((s,f)=>s+(+f.importo||0),0);
+
+  return fatture>0
+    ? fatture
+    : (eco.definizioniFornitore||[])
+        .reduce((s,d)=>s+(+d.importo||0),0);
 }
 
 /* lotti disponibili al netto di lavorazioni parziali e uscite */
@@ -852,10 +869,38 @@ function canEditPartita(p){
   return !Object.values(DB.documenti).some(d=>(d.righe||[]).some(r=>r.partitaId===p.id));
 }
 function naturaValorizzazione(d){
-  return d&&((d.valorizzazione&&d.valorizzazione.natura==='costo')||d.naturaEconomicaBozza==='costo'||(!d.valorizzazione&&d.fatturaCosto&&!d.fatturaCliente))?'costo':'ricavo';
+  if(!d) return 'ricavo';
+
+  const eco=documentoEconomicsData(d);
+
+  return (
+    (eco.valorizzazione && eco.valorizzazione.natura==='costo') ||
+    eco.naturaEconomicaBozza==='costo' ||
+    (!eco.valorizzazione && eco.fatturaCosto && !eco.fatturaCliente)
+  ) ? 'costo' : 'ricavo';
 }
-function uscitaValorizzata(d){ return !!(d&&d.valorizzazione&&Number.isFinite(+d.valorizzazione.valoreRiconosciuto)&&+d.valorizzazione.valoreRiconosciuto>0); }
-function documentoEconomicoUscita(d){ return naturaValorizzazione(d)==='costo'?(d.fatturaCosto||null):(d.fatturaCliente||null); }
+
+function uscitaValorizzata(d){
+  if(!d) return false;
+
+  const eco=documentoEconomicsData(d);
+
+  return !!(
+    eco.valorizzazione &&
+    Number.isFinite(+eco.valorizzazione.valoreRiconosciuto) &&
+    +eco.valorizzazione.valoreRiconosciuto>0
+  );
+}
+
+function documentoEconomicoUscita(d){
+  if(!d) return null;
+
+  const eco=documentoEconomicsData(d);
+
+  return naturaValorizzazione(d)==='costo'
+    ? (eco.fatturaCosto||null)
+    : (eco.fatturaCliente||null);
+}
 function documentoIngressoLabel(p){
   const docs=(p.formulariIngresso||[]).map(f=>`${f.numero||'—'}${f.data?' · '+dfmt(f.data):''}`);
   return docs.join(', ')||'Nessun documento di entrata';
