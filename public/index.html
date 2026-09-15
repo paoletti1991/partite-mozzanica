@@ -766,6 +766,17 @@ function annoStats(year){
 function render(){
   const years=availableYears();
   if(!years.includes(YEAR)) YEAR=new Date().getFullYear();
+
+  if(CLOUD.user && CLOUD.profile && !canViewSection(ROUTE.view)){
+    ROUTE={view:'dash',id:null};
+
+    if(location.hash!=='#dash'){
+      history.replaceState(null,'','#dash');
+    }
+
+    toast('Non hai i permessi per accedere a questa sezione','err');
+  }
+
   renderNav(); renderYears();
   const v = ROUTE.view;
   const titles = {dash:'Cruscotto',partite:'Partite',uscite:'Documenti di uscita',rimanenze:'Rimanenze magazzino',dafornitore:'Da definire col fornitore',report:'Report movimentazioni',produttori:'Produttori',trasportatori:'Trasportatori',partita:'Dettaglio partita'};
