@@ -370,6 +370,17 @@ if(enabled){
     const app=appMod.initializeApp(cfg);
     const auth=authMod.getAuth(app), database=dbMod.getDatabase(app), storage=storageMod.getStorage(app);
     const dataRef=dbMod.ref(database,'registroMozzanica/current');
+    const registroRef=dbMod.ref(database,'registroMozzanica');
+
+const branchRefs={
+  partite:dbMod.ref(database,'registroMozzanica/partite'),
+  documenti:dbMod.ref(database,'registroMozzanica/documenti'),
+  produttori:dbMod.ref(database,'registroMozzanica/produttori'),
+  trasportatori:dbMod.ref(database,'registroMozzanica/trasportatori'),
+  counters:dbMod.ref(database,'registroMozzanica/counters'),
+  economics:dbMod.ref(database,'registroMozzanica/economics'),
+  audit:dbMod.ref(database,'registroMozzanica/audit')
+};
     window.firebaseBridge={
       configured:true,
       onAuth(callback){return authMod.onAuthStateChanged(auth,callback);},
