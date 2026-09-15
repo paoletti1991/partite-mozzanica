@@ -510,12 +510,97 @@ let DB=emptyDB();
 let CLOUD={configured:FB_ON,user:null,profile:null,ready:false,syncing:false,lastSync:0,error:'',unsubscribe:null};
 let cloudSaveTimer=null;
 
-function emptyDB(){return {partite:{},produttori:{},trasportatori:{},documenti:{},counters:{},_meta:{schemaVersion:2,updatedAt:Date.now()}};}
+function emptyDB(){
+  return {
+    partite:{},
+    produttori:{},
+    trasportatori:{},
+    documenti:{},
+    counters:{},
+    economics:{
+      partite:{},
+      documenti:{}
+    },
+    _meta:{
+      schemaVersion:3,
+      updatedAt:Date.now()
+    }
+  };
+}
 function normalizeDB(data){
   const d=(data&&typeof data==='object')?data:emptyDB();
-  ['partite','produttori','trasportatori','documenti','counters'].forEach(k=>d[k]=d[k]||{});
-  d._meta=d._meta||{}; d._meta.schemaVersion=2; d._meta.updatedAt=+d._meta.updatedAt||Date.now();
+
+  ['partite','produttori','trasportatori','documenti','counters']
+    .forEach(k=>d[k]=d[k]||{});
+
+  d.economics=d.economics||{};
+  d.economics.partite=d.economics.partite||{};
+  d.economics.documenti=d.economics.documenti||{};
+
+  d._meta=d._meta||{};
+  d._meta.schemaVersion=3;
+  d._meta.updatedAt=+d._meta.updatedAt||Date.now();
+
   return d;
+}
+  function partitaEconomicsData(p){
+  if(!p){
+    return {
+      fattureAcquisto:[],
+      definizioniFornitore:[],
+      trasportoIngresso:null
+    };
+  }
+
+  const stored=DB.economics?.partite?.[p.id];
+
+  if(stored){
+    return {
+      fattureAcquisto:stored.fattureAcquisto||[],
+      definizioniFornitore:stored.definizioniFornitore||[],
+      trasportoIngresso:stored.trasportoIngresso||null
+    };
+  }
+
+  // Compatibilità temporanea con il vecchio archivio
+  return {
+    fattureAcquisto:p.fattureAcquisto||[],
+    definizioniFornitore:p.definizioniFornitore||[],
+    trasportoIngresso:p.trasportoIngresso||null
+  };
+}
+
+function documentoEconomicsData(d){
+  if(!d){
+    return {
+      trasportoCosto:0,
+      valorizzazione:null,
+      naturaEconomicaBozza:null,
+      fatturaCliente:null,
+      fatturaCosto:null
+    };
+  }
+
+  const stored=DB.economics?.documenti?.[d.id];
+
+  if(stored){
+    return {
+      trasportoCosto:+stored.trasportoCosto||0,
+      valorizzazione:stored.valorizzazione||null,
+      naturaEconomicaBozza:stored.naturaEconomicaBozza||null,
+      fatturaCliente:stored.fatturaCliente||null,
+      fatturaCosto:stored.fatturaCosto||null
+    };
+  }
+
+  // Compatibilità temporanea con il vecchio archivio
+  return {
+    trasportoCosto:+d.trasportoCosto||0,
+    valorizzazione:d.valorizzazione||null,
+    naturaEconomicaBozza:d.naturaEconomicaBozza||null,
+    fatturaCliente:d.fatturaCliente||null,
+    fatturaCosto:d.fatturaCosto||null
+  };
 }
 function hasBusinessData(data){return !!(data&&(Object.keys(data.partite||{}).length||Object.keys(data.documenti||{}).length||Object.keys(data.produttori||{}).length||Object.keys(data.trasportatori||{}).length));}
 function load(){
