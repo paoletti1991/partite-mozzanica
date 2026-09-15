@@ -2451,19 +2451,23 @@ function saveDocumento(){
 
 /* ---- VISTA DOCUMENTO + VALORIZZAZIONE ---- */
 function openDocView(id){
-  const d=DB.documenti[id]; if(!d)return;
-  const rip=ripartizioneDoc(d);
-  const natura=naturaValorizzazione(d), docEco=documentoEconomicoUscita(d);
+const d=DB.documenti[id];
+if(!d) return;
+
+const eco=documentoEconomicsData(d);
+const rip=ripartizioneDoc(d);
+const natura=naturaValorizzazione(d);
+const docEco=documentoEconomicoUscita(d);
   modal(`<div class="modal wide"><div class="modal-h"><h3><span class="tag ${d.tipo==='fir'?'grey':'brass'}">${d.tipo==='fir'?'FIR':'Annex VII'}</span> ${esc(d.numero)}</h3><button class="x" onclick="closeModal()">×</button></div>
   <div class="modal-b">
     <div class="row"><div class="det-head" style="margin:0 0 16px">
-      <div class="meta"><div class="row" style="margin:0"><span>Data <b>${dfmt(d.data)}</b></span><span>Destinatario <b>${esc(d.destinatario)}</b></span>${d.trasportatoreId?`<span>Trasporto <b>${esc(DB.trasportatori[d.trasportatoreId]?.ragioneSociale||'')}</b> ${d.trasportoInterno?'(interno)':eur(d.trasportoCosto)}</span>`:''}</div></div>
+      <div class="meta"><div class="row" style="margin:0"><span>Data <b>${dfmt(d.data)}</b></span><span>Destinatario <b>${esc(d.destinatario)}</b></span>${d.trasportatoreId?`<span>Trasporto <b>${esc(DB.trasportatori[d.trasportatoreId]?.ragioneSociale||'')}</b> ${d.trasportoInterno?'(interno)':eur(eco.trasportoCosto)}</span>`:''}</div></div>
     </div></div>
 
     <div class="sec"><div class="sec-h"><h4>Valorizzazione economica dell'uscita</h4></div><div class="sec-b">
       <div class="row2">
         <div class="field"><label>Natura economica</label><select class="inp" id="v_natura" data-original="${natura}" onchange="updateValorizzazioneNatura()"><option value="ricavo" ${natura==='ricavo'?'selected':''}>Ricavo (+)</option><option value="costo" ${natura==='costo'?'selected':''}>Costo / perdita (−)</option></select></div>
-        <div class="field"><label>Importo €</label><input class="inp num" id="v_val" type="number" min="0.01" step="0.01" value="${uscitaValorizzata(d)?Math.abs(+d.valorizzazione.valoreRiconosciuto):''}" placeholder="da inserire per chiudere la posizione"></div>
+        <div class="field"><label>Importo €</label><input class="inp num" id="v_val" type="number" min="0.01" step="0.01" value="${uscitaValorizzata(d)?Math.abs(+eco.valorizzazione.valoreRiconosciuto):''}" placeholder="da inserire per chiudere la posizione"></div>
       </div>
       <div class="row2">
         <div class="field"><label id="v_fnum_label">${natura==='costo'?'N. fattura costo / impianto':'N. fattura cliente'}</label><input class="inp mono" id="v_fnum" value="${esc(docEco?.numero||'')}" placeholder="es. FV 125/2026"></div>
