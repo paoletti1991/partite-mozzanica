@@ -387,7 +387,7 @@ const branchRefs={
       signIn(email,password){return authMod.signInWithEmailAndPassword(auth,email,password);},
       signOut(){return authMod.signOut(auth);},
       async readUserProfile(uid){const snap=await dbMod.get(dbMod.ref(database,'accessControl/users/'+uid));return snap.exists()?snap.val():null;},
-      async migrateLegacyToBranches(){
+     async migrateLegacyToBranches(){
   const legacySnap=await dbMod.get(dataRef);
 
   if(!legacySnap.exists()){
@@ -401,39 +401,83 @@ const branchRefs={
     throw new Error('Dati precedenti non trovati');
   }
 
-  const sections=[
+  const destinationSections=[
     'partite',
     'documenti',
     'produttori',
     'trasportatori',
-    'counters'
+    'counters',
+    'economics'
   ];
 
   const existing=await Promise.all(
-    sections.map(section=>dbMod.get(branchRefs[section]))
+    destinationSections.map(section=>dbMod.get(branchRefs[section]))
   );
 
   if(existing.some(snap=>snap.exists())){
-    throw new Error('Migrazione interrotta: una o più nuove sezioni contengono già dati');
+    throw new Error(
+      'Migrazione interrotta: una o più nuove sezioni contengono già dati'
+    );
   }
 
-  const updates={};
+  const partiteOperative={};
+  const documentiOperativi={};
 
-  sections.forEach(section=>{
-    if(legacy[section] && typeof legacy[section]==='object'){
-      updates[section]=legacy[section];
-    }
+  const economics={
+    partite:{},
+    documenti:{}
+  };
+
+  Object.entries(legacy.partite||{}).forEach(([id,source])=>{
+    const p=JSON.parse(JSON.stringify(source));
+
+    economics.partite[id]={
+      fattureAcquisto:p.fattureAcquisto||[],
+      definizioniFornitore:p.definizioniFornitore||[],
+      trasportoIngresso:p.trasportoIngresso||null
+    };
+
+    delete p.fattureAcquisto;
+    delete p.definizioniFornitore;
+    delete p.trasportoIngresso;
+
+    partiteOperative[id]=p;
   });
 
-  if(!Object.keys(updates).length){
-    throw new Error('Nessun dato da migrare');
-  }
+  Object.entries(legacy.documenti||{}).forEach(([id,source])=>{
+    const d=JSON.parse(JSON.stringify(source));
+
+    economics.documenti[id]={
+      trasportoCosto:d.trasportoCosto||0,
+      valorizzazione:d.valorizzazione||null,
+      naturaEconomicaBozza:d.naturaEconomicaBozza||null,
+      fatturaCliente:d.fatturaCliente||null,
+      fatturaCosto:d.fatturaCosto||null
+    };
+
+    delete d.trasportoCosto;
+    delete d.valorizzazione;
+    delete d.naturaEconomicaBozza;
+    delete d.fatturaCliente;
+    delete d.fatturaCosto;
+
+    documentiOperativi[id]=d;
+  });
+
+  const updates={
+    partite:partiteOperative,
+    documenti:documentiOperativi,
+    produttori:legacy.produttori||{},
+    trasportatori:legacy.trasportatori||{},
+    counters:legacy.counters||{},
+    economics
+  };
 
   await dbMod.update(registroRef,updates);
 
   return {
-    partite:Object.keys(legacy.partite||{}).length,
-    documenti:Object.keys(legacy.documenti||{}).length,
+    partite:Object.keys(partiteOperative).length,
+    documenti:Object.keys(documentiOperativi).length,
     produttori:Object.keys(legacy.produttori||{}).length,
     trasportatori:Object.keys(legacy.trasportatori||{}).length
   };
