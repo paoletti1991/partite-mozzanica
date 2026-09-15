@@ -375,6 +375,7 @@ if(enabled){
       onAuth(callback){return authMod.onAuthStateChanged(auth,callback);},
       signIn(email,password){return authMod.signInWithEmailAndPassword(auth,email,password);},
       signOut(){return authMod.signOut(auth);},
+      async readUserProfile(uid){const snap=await dbMod.get(dbMod.ref(database,'accessControl/users/'+uid));return snap.exists()?snap.val():null;},
       async read(){const snap=await dbMod.get(dataRef);return snap.exists()?snap.val():null;},
       write(data){return dbMod.set(dataRef,{data,updatedAt:dbMod.serverTimestamp(),updatedBy:auth.currentUser?.uid||''});},
       listen(callback){return dbMod.onValue(dataRef,snap=>callback(snap.exists()?snap.val():null));},
