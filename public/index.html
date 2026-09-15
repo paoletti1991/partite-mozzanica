@@ -2212,10 +2212,6 @@ async function saveFattura(pid){
     uploadWarning?'err':''
   );
 }
-  p.fattureAcquisto=p.fattureAcquisto||[];
-  p.fattureAcquisto.push({id:uid('ft'),numero:num,data:document.getElementById('f_data').value,importo:imp,pdf});
-  save(); closeModal(); render(); toast(uploadWarning?'Fattura salvata; uno o più PDF restano solo come metadati':'Fattura aggiunta'+(pdf.length?' con PDF cloud':''),uploadWarning?'err':'');
-}
 function delFattura(pid,fid){
   const p=DB.partite[pid];
   if(!p) return;
