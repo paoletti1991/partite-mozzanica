@@ -2495,28 +2495,100 @@ function updateValorizzazioneNatura(){
   if(hint) hint.textContent=(costo?'L’importo sarà registrato con segno negativo e ridurrà il risultato economico.':'L’importo sarà registrato con segno positivo.')+' Puoi salvare anche il solo numero di fattura; la quota resterà da definire finché non inserirai l’importo.';
 }
 function saveValor(id){
-  const d=DB.documenti[id]; if(!d){ toast('Documento non trovato','err'); return; }
+  const d=DB.documenti[id];
+
+  if(!d){
+    toast('Documento non trovato','err');
+    return;
+  }
+
   const rawVal=document.getElementById('v_val').value.trim();
-  const v=rawVal===''?null:+rawVal;
-  const natura=document.getElementById('v_natura').value==='costo'?'costo':'ricavo';
+  const v=rawVal==='' ? null : +rawVal;
+  const natura=document.getElementById('v_natura').value==='costo'
+    ? 'costo'
+    : 'ricavo';
+
   const fnum=document.getElementById('v_fnum').value.trim();
   const fdata=document.getElementById('v_fdata').value;
-  const hasVal=Number.isFinite(v)&&v>0;
-  if(rawVal!==''&&!hasVal){ toast('Inserisci un importo valido maggiore di zero','err'); return; }
-  if(!hasVal&&!fnum){ toast('Inserisci almeno il valore economico oppure il numero della fattura','err'); return; }
-  if(!fnum&&fdata){ toast('Per registrare la data indica anche il numero della fattura','err'); return; }
 
-  const oldVal=d.valorizzazione?JSON.parse(JSON.stringify(d.valorizzazione)):null;
-  const oldCliente=d.fatturaCliente?JSON.parse(JSON.stringify(d.fatturaCliente)):null;
-  const oldCosto=d.fatturaCosto?JSON.parse(JSON.stringify(d.fatturaCosto)):null;
-  const oldNatura=d.naturaEconomicaBozza;
-  d.valorizzazione=hasVal?{valoreRiconosciuto:Math.abs(v),natura}:null;
-  d.naturaEconomicaBozza=natura;
-  d.fatturaCliente=natura==='ricavo'&&fnum?{numero:fnum,data:fdata}:null;
-  d.fatturaCosto=natura==='costo'&&fnum?{numero:fnum,data:fdata}:null;
-  if(!save()){ d.valorizzazione=oldVal; d.naturaEconomicaBozza=oldNatura; d.fatturaCliente=oldCliente; d.fatturaCosto=oldCosto; return; }
-  openDocView(id); render();
-  toast(hasVal?(natura==='costo'?'Costo di uscita registrato':'Ricavo di uscita registrato'):'Numero fattura salvato: uscita ancora da valorizzare');
+  const hasVal=Number.isFinite(v)&&v>0;
+
+  if(rawVal!==''&&!hasVal){
+    toast('Inserisci un importo valido maggiore di zero','err');
+    return;
+  }
+
+  if(!hasVal&&!fnum){
+    toast(
+      'Inserisci almeno il valore economico oppure il numero della fattura',
+      'err'
+    );
+    return;
+  }
+
+  if(!fnum&&fdata){
+    toast(
+      'Per registrare la data indica anche il numero della fattura',
+      'err'
+    );
+    return;
+  }
+
+  const hadEconomics=!!DB.economics?.documenti?.[id];
+
+  const previousEconomics=hadEconomics
+    ? JSON.parse(JSON.stringify(DB.economics.documenti[id]))
+    : null;
+
+  const eco=ensureDocumentoEconomics(d);
+
+  eco.valorizzazione=hasVal
+    ? {
+        valoreRiconosciuto:Math.abs(v),
+        natura
+      }
+    : null;
+
+  eco.naturaEconomicaBozza=natura;
+
+  eco.fatturaCliente=
+    natura==='ricavo'&&fnum
+      ? {
+          numero:fnum,
+          data:fdata
+        }
+      : null;
+
+  eco.fatturaCosto=
+    natura==='costo'&&fnum
+      ? {
+          numero:fnum,
+          data:fdata
+        }
+      : null;
+
+  if(!save()){
+    if(hadEconomics){
+      DB.economics.documenti[id]=previousEconomics;
+    }else{
+      delete DB.economics.documenti[id];
+    }
+
+    return;
+  }
+
+  openDocView(id);
+  render();
+
+  toast(
+    hasVal
+      ? (
+          natura==='costo'
+            ? 'Costo di uscita registrato'
+            : 'Ricavo di uscita registrato'
+        )
+      : 'Numero fattura salvato: uscita ancora da valorizzare'
+  );
 }
 function deleteDocumento(documentoId){
   const d=DB.documenti[documentoId];
