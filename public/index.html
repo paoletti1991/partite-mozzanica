@@ -527,6 +527,26 @@ function hasPermission(section,action='read'){
   if(!CLOUD.profile || CLOUD.profile.active!==true) return false;
   return CLOUD.profile.permissions?.[section]?.[action]===true;
 }
+  function canViewSection(view){
+  if(isAdmin()) return true;
+
+  const permissions={
+    dash: ['dashboard','read'],
+    partite: ['partite','read'],
+    partita: ['partite','read'],
+    uscite: ['uscite','read'],
+    rimanenze: ['rimanenze','read'],
+    dafornitore: ['economics','read'],
+    report: ['report','read'],
+    produttori: ['produttori','read'],
+    trasportatori: ['trasportatori','read']
+  };
+
+  const rule=permissions[view];
+  if(!rule) return false;
+
+  return hasPermission(rule[0],rule[1]);
+}
 /* progressivo N-Raee per anno */
 function nextNum(year){
   const list = Object.values(DB.partite).filter(p=>p.anno===year);
@@ -766,11 +786,20 @@ function updateStoreStatus(){
   else{dot.className='st-dot';label.textContent='Archivio locale';}
 }
 function renderNav(){
-  const daForn = Object.values(DB.partite).filter(p=>p.anno===YEAR).reduce((s,p)=>s+quoteDaDefinireConFornitore(p).length,0);
+  const daForn = Object.values(DB.partite)
+    .filter(p=>p.anno===YEAR)
+    .reduce((s,p)=>s+quoteDaDefinireConFornitore(p).length,0);
+
   document.getElementById('nav').innerHTML = NAV.map(n=>{
     if(n.grp) return `<div class="grp">${n.grp}</div>`;
+
+    if(!canViewSection(n.k)) return '';
+
     const on = ROUTE.view===n.k || (n.k==='partite'&&ROUTE.view==='partita');
-    const badge = n.k==='dafornitore' && daForn>0 ? `<span class="badge">${daForn}</span>` : '';
+    const badge = n.k==='dafornitore' && daForn>0
+      ? `<span class="badge">${daForn}</span>`
+      : '';
+
     return `<a class="${on?'on':''} ${n.warn?'warnb':''}" href="#${n.k}">${svgIco(n.ico)}${n.t}${badge}</a>`;
   }).join('');
 }
