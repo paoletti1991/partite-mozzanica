@@ -387,6 +387,57 @@ const branchRefs={
       signIn(email,password){return authMod.signInWithEmailAndPassword(auth,email,password);},
       signOut(){return authMod.signOut(auth);},
       async readUserProfile(uid){const snap=await dbMod.get(dbMod.ref(database,'accessControl/users/'+uid));return snap.exists()?snap.val():null;},
+      async migrateLegacyToBranches(){
+  const legacySnap=await dbMod.get(dataRef);
+
+  if(!legacySnap.exists()){
+    throw new Error('Archivio precedente non trovato');
+  }
+
+  const wrapper=legacySnap.val();
+  const legacy=wrapper?.data;
+
+  if(!legacy){
+    throw new Error('Dati precedenti non trovati');
+  }
+
+  const sections=[
+    'partite',
+    'documenti',
+    'produttori',
+    'trasportatori',
+    'counters'
+  ];
+
+  const existing=await Promise.all(
+    sections.map(section=>dbMod.get(branchRefs[section]))
+  );
+
+  if(existing.some(snap=>snap.exists())){
+    throw new Error('Migrazione interrotta: una o più nuove sezioni contengono già dati');
+  }
+
+  const updates={};
+
+  sections.forEach(section=>{
+    if(legacy[section] && typeof legacy[section]==='object'){
+      updates[section]=legacy[section];
+    }
+  });
+
+  if(!Object.keys(updates).length){
+    throw new Error('Nessun dato da migrare');
+  }
+
+  await dbMod.update(registroRef,updates);
+
+  return {
+    partite:Object.keys(legacy.partite||{}).length,
+    documenti:Object.keys(legacy.documenti||{}).length,
+    produttori:Object.keys(legacy.produttori||{}).length,
+    trasportatori:Object.keys(legacy.trasportatori||{}).length
+  };
+},
       async read(){const snap=await dbMod.get(dataRef);return snap.exists()?snap.val():null;},
       write(data){return dbMod.set(dataRef,{data,updatedAt:dbMod.serverTimestamp(),updatedBy:auth.currentUser?.uid||''});},
       listen(callback){return dbMod.onValue(dataRef,snap=>callback(snap.exists()?snap.val():null));},
