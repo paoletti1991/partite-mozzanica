@@ -1229,7 +1229,10 @@ function viewDash(){
   const valuedDocs=docs.filter(uscitaValorizzata).length;
   const completion=docs.length?Math.round(valuedDocs/docs.length*100):0;
   const docsNoInvoice=docs.filter(d=>uscitaValorizzata(d)&&!String(documentoEconomicoUscita(d)?.numero||'').trim()).length;
-  const missingPurchase=ps.filter(p=>!(p.fattureAcquisto||[]).some(f=>(+f.importo||0)>0));
+  const missingPurchase=ps.filter(p=>
+    !(partitaEconomicsData(p).fattureAcquisto||[])
+      .some(f=>(+f.importo||0)>0)
+  );
   const hazardousStock=ps.filter(p=>giacenza(p)>0.01&&cerByCode[p.cer]?.hazard);
   const worked=ps.filter(p=>(p.lavorazioni||[]).length>0).length;
   const status={stock:0,partial:0,closed:0};
@@ -1353,6 +1356,7 @@ function viewPartite(){
 function viewPartitaDetail(){
   const p = DB.partite[ROUTE.id];
   if(!p) return emptyState('Partita non trovata','');
+  const ecoPartita = partitaEconomicsData(p);
   const e = partitaEconomics(p); const ekgI=eurokgIngresso(p); const g=giacenza(p);
   const prod = DB.produttori[p.produttoreId]||{};
   const lotti = lottiDisponibili(p);
@@ -1389,8 +1393,8 @@ function viewPartitaDetail(){
       <!-- FATTURE ACQUISTO -->
       <div class="sec"><div class="sec-h"><h4>Fatture d'acquisto</h4><span class="sp"></span><button class="btn sm" onclick="openFattura('${p.id}')">+ Fattura</button></div>
       <div class="sec-b pad0">
-        ${(p.fattureAcquisto||[]).length? `<table><thead><tr><th>N. fattura</th><th>Data</th><th>Importo</th><th>Allegati</th><th></th></tr></thead><tbody>
-        ${p.fattureAcquisto.map(f=>`<tr><td class="mono">${esc(f.numero||'—')}</td><td>${dfmt(f.data)}</td><td class="num">${eur(f.importo)}</td>
+        ${(ecoPartita.fattureAcquisto||[]).length? `<table><thead><tr><th>N. fattura</th><th>Data</th><th>Importo</th><th>Allegati</th><th></th></tr></thead><tbody>
+        ${(ecoPartita.fattureAcquisto||[]).map(f=>`<tr><td class="mono">${esc(f.numero||'—')}</td><td>${dfmt(f.data)}</td><td class="num">${eur(f.importo)}</td>
           <td>${(f.pdf||[]).map(pf=>pf.url?`<a class="pill-file" href="${esc(pf.url)}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h9l5 5v15H6z" fill="none" stroke="currentColor" stroke-width="2"/></svg>${esc(pf.name)}</a>`:`<span class="pill-file" title="File non caricato nel cloud"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h9l5 5v15H6z" fill="none" stroke="currentColor" stroke-width="2"/></svg>${esc(pf.name)} · solo metadati</span>`).join('')||'<span class="mini">nessuno</span>'}</td>
           <td><button class="btn ghost sm" onclick="delFattura('${p.id}','${f.id}')">✕</button></td></tr>`).join('')}
         <tr><td colspan="2" style="font-weight:600">Totale acquisto</td><td class="num" style="font-weight:600">${eur(costoAcquisto(p))}</td><td colspan="2" class="num">${ekg(ekgI)}</td></tr>
@@ -1447,7 +1451,7 @@ function viewPartitaDetail(){
         ${prod.piva?`<div class="kv"><span class="k">P.IVA</span><span class="v mono">${esc(prod.piva)}</span></div>`:''}
         ${prod.indirizzo?`<div class="kv"><span class="k">Sede legale</span><span class="v" style="max-width:180px">${esc(prod.indirizzo)}</span></div>`:''}
         ${(p.formulariIngresso||[]).map(fo=>`<div class="kv"><span class="k">Formulario</span><span class="v mono">${esc(fo.numero)} · ${dfmt(fo.data)}</span></div>`).join('')}
-        ${p.trasportoIngresso?`<div class="kv"><span class="k">Trasp. ingresso</span><span class="v">${eur(p.trasportoIngresso.importo)}</span></div>`:''}
+        ${ecoPartita.trasportoIngresso?`<div class="kv"><span class="k">Trasp. ingresso</span><span class="v">${eur(ecoPartita.trasportoIngresso.importo)}</span></div>`:''}
       </div></div>
     </div>
   </div>`;
@@ -1488,7 +1492,7 @@ function viewUscite(){
         <td class="num">${kg(rip.totKg)}</td>
         <td class="num" style="color:${rip.V<0?'var(--red)':'var(--green)'}">${uscitaValorizzata(d)?eur(rip.V):'—'}</td>
         <td>${documentoEconomicoUscita(d)?`<span class="mono">${esc(documentoEconomicoUscita(d).numero)}</span><br><span class="mini">${dfmt(documentoEconomicoUscita(d).data)}</span>`:'—'}</td>
-        <td>${uscitaValorizzata(d)?(naturaValorizzazione(d)==='costo'?'<span class="tag haz">costo / perdita</span>':(d.fatturaCliente?'<span class="tag green">ricavo fatturato</span>':'<span class="tag brass">ricavo da fatturare</span>')):'<span class="tag amber">da valorizzare</span>'}</td></tr>`;
+        <td>${uscitaValorizzata(d)?(naturaValorizzazione(d)==='costo'?'<span class="tag haz">costo / perdita</span>':(documentoEconomicoUscita(d)?'<span class="tag green">ricavo fatturato</span>':'<span class="tag brass">ricavo da fatturare</span>')):'<span class="tag amber">da valorizzare</span>'}</td></tr>`;
     }).join('')}</tbody></table>` : emptyState('Nessun documento di uscita','Crea un Annex VII o FIR e associa una o più partite.')}
   </div>`;
 }
@@ -1707,7 +1711,8 @@ function lottoStoricoLabel(p,key){
 }
 function reportPartitaHtml(p,nested){
   const prod=DB.produttori[p.produttoreId]||{};
-  const lavs=p.lavorazioni||[], formulari=p.formulariIngresso||[], fatture=p.fattureAcquisto||[], definizioni=p.definizioniFornitore||[];
+  const ecoPartita=partitaEconomicsData(p);
+  const lavs=p.lavorazioni||[], formulari=p.formulariIngresso||[], fatture=ecoPartita.fattureAcquisto||[], definizioni=ecoPartita.definizioniFornitore||[];
   const disponibilita=lottiDisponibili(p).filter(l=>l.kg>0.01);
   const uscite=[];
   Object.values(DB.documenti).forEach(d=>{
@@ -1730,8 +1735,8 @@ function reportPartitaHtml(p,nested){
       ${formulari.map(f=>`<tr><td>Formulario ingresso</td><td class="mono">${esc(f.numero||'—')}</td><td>${dfmt(f.data)}</td><td>Produttore: ${esc(prod.ragioneSociale||'—')}</td></tr>`).join('')}
       ${fatture.map(f=>`<tr><td>Fattura fornitore</td><td class="mono">${esc(f.numero||'—')}</td><td>${dfmt(f.data)}</td><td>${eur(f.importo)}${(f.pdf||[]).length?' · '+(f.pdf||[]).map(x=>esc(x.name)).join(', '):''}</td></tr>`).join('')}
       ${definizioni.map(d=>`<tr><td>Definizione fornitore (${d.scope==='partita'?'intera partita':'quota'})</td><td class="mono">${esc(d.numeroDocumento||'—')}</td><td>${dfmt(d.dataDocumento)}</td><td>${kg(d.kg)} · ${ekg(d.prezzoKg)} · ${eur(d.importo)} · ${esc(d.riferimento||'')}</td></tr>`).join('')}
-      ${p.trasportoIngresso?`<tr><td>Trasporto ingresso</td><td>—</td><td>—</td><td>${eur(p.trasportoIngresso.importo)}</td></tr>`:''}
-      ${!formulari.length&&!fatture.length&&!definizioni.length&&!p.trasportoIngresso?'<tr><td colspan="4">Nessun documento di ingresso o acquisto registrato.</td></tr>':''}
+      ${ecoPartita.trasportoIngresso?`<tr><td>Trasporto ingresso</td><td>—</td><td>—</td><td>${eur(ecoPartita.trasportoIngresso.importo)}</td></tr>`:''}
+      ${!formulari.length&&!fatture.length&&!definizioni.length&&!ecoPartita.trasportoIngresso?'<tr><td colspan="4">Nessun documento di ingresso o acquisto registrato.</td></tr>':''}
     </tbody></table>
     <h3>Lavorazioni interne (${lavs.length})</h3>
     <table><thead><tr><th>Data</th><th>Tipo</th><th>Lotto origine</th><th>Kg lavorati</th><th>Risultato</th><th>Calo / scarto</th></tr></thead><tbody>
