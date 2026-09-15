@@ -580,7 +580,57 @@ function documentoEconomicsData(d){
       fatturaCosto:null
     };
   }
+function ensurePartitaEconomics(p){
+  if(!p) return null;
 
+  DB.economics=DB.economics||{};
+  DB.economics.partite=DB.economics.partite||{};
+
+  if(!DB.economics.partite[p.id]){
+    const current=partitaEconomicsData(p);
+
+    DB.economics.partite[p.id]={
+      fattureAcquisto:JSON.parse(
+        JSON.stringify(current.fattureAcquisto||[])
+      ),
+      definizioniFornitore:JSON.parse(
+        JSON.stringify(current.definizioniFornitore||[])
+      ),
+      trasportoIngresso:current.trasportoIngresso
+        ? JSON.parse(JSON.stringify(current.trasportoIngresso))
+        : null
+    };
+  }
+
+  return DB.economics.partite[p.id];
+}
+
+function ensureDocumentoEconomics(d){
+  if(!d) return null;
+
+  DB.economics=DB.economics||{};
+  DB.economics.documenti=DB.economics.documenti||{};
+
+  if(!DB.economics.documenti[d.id]){
+    const current=documentoEconomicsData(d);
+
+    DB.economics.documenti[d.id]={
+      trasportoCosto:+current.trasportoCosto||0,
+      valorizzazione:current.valorizzazione
+        ? JSON.parse(JSON.stringify(current.valorizzazione))
+        : null,
+      naturaEconomicaBozza:current.naturaEconomicaBozza||null,
+      fatturaCliente:current.fatturaCliente
+        ? JSON.parse(JSON.stringify(current.fatturaCliente))
+        : null,
+      fatturaCosto:current.fatturaCosto
+        ? JSON.parse(JSON.stringify(current.fatturaCosto))
+        : null
+    };
+  }
+
+  return DB.economics.documenti[d.id];
+}
   const stored=DB.economics?.documenti?.[d.id];
 
   if(stored){
