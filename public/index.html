@@ -1039,17 +1039,6 @@ function ripartizioneDoc(d){
     fallbackKg
   };
 }
-  const totBase = righe.reduce((s,x)=>s+x.base,0);
-  const totKg = righe.reduce((s,x)=>s+x.kg,0);
-  const fallbackKg = totBase===0 || righe.some(x=>x.ekgI==null); // finché manca un prezzo, ripartizione coerente a peso
-  righe.forEach(x=>{
-    if(!V){ x.quota=0; return; }
-    if(fallbackKg){ x.quota = totKg? V*x.kg/totKg : 0; }
-    else { x.quota = totBase? V*x.base/totBase : 0; }
-  });
-  return {V, righe, totBase, totKg, fallbackKg};
-}
-
 /* aggregati per partita */
 function partitaEconomics(p){
   let ricavo=0;
