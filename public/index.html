@@ -401,7 +401,7 @@ if(enabled){
 const FB_ON = !!(firebaseConfig&&firebaseConfig.apiKey&&firebaseConfig.projectId&&firebaseConfig.databaseURL);
 const LS_KEY='valmet_raee_v1', LS_PREV_KEY='valmet_raee_previous_v1';
 let DB=emptyDB();
-let CLOUD={configured:FB_ON,user:null,ready:false,syncing:false,lastSync:0,error:'',unsubscribe:null};
+let CLOUD={configured:FB_ON,user:null,profile:null,ready:false,syncing:false,lastSync:0,error:'',unsubscribe:null};
 let cloudSaveTimer=null;
 
 function emptyDB(){return {partite:{},produttori:{},trasportatori:{},documenti:{},counters:{},_meta:{schemaVersion:2,updatedAt:Date.now()}};}
@@ -465,9 +465,52 @@ function initCloudBridge(){
   if(CLOUD.ready)return;
   if(!window.firebaseBridge){updateStoreStatus();return;}
   CLOUD.ready=true;
-  window.firebaseBridge.onAuth(user=>{
-    CLOUD.user=user||null;CLOUD.error='';updateStoreStatus();
-    if(user)syncInitialCloud();else if(CLOUD.unsubscribe){CLOUD.unsubscribe();CLOUD.unsubscribe=null;}
+
+  window.firebaseBridge.onAuth(async user=>{
+    CLOUD.user=user||null;
+    CLOUD.profile=null;
+    CLOUD.error='';
+
+    if(CLOUD.unsubscribe){
+      CLOUD.unsubscribe();
+      CLOUD.unsubscribe=null;
+    }
+
+    if(!user){
+      DB=emptyDB();
+      updateStoreStatus();
+      render();
+      return;
+    }
+
+    try{
+      const profile=await window.firebaseBridge.readUserProfile(user.uid);
+
+      if(!profile || profile.active!==true){
+        DB=emptyDB();
+        CLOUD.error='Utente non autorizzato';
+        updateStoreStatus();
+        render();
+        return;
+      }
+
+      CLOUD.profile=profile;
+
+      if(profile.role==='admin'){
+        await syncInitialCloud();
+      }else{
+        DB=emptyDB();
+      }
+
+      updateStoreStatus();
+      render();
+
+    }catch(e){
+      DB=emptyDB();
+      CLOUD.error='Profilo utente non disponibile';
+      updateStoreStatus();
+      render();
+    }
   });
 }
 window.addEventListener('firebase-bridge-ready',e=>{
