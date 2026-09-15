@@ -2,6 +2,16 @@
   "rules": {
     ".read": false,
     ".write": false,
+
+    "accessControl": {
+      "users": {
+        "$uid": {
+          ".read": "auth != null && (auth.uid === $uid || auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1')",
+          ".write": "auth != null && auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1'"
+        }
+      }
+    },
+
     "registroMozzanica": {
       ".read": "auth != null && auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1'",
       ".write": "auth != null && auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1'"
