@@ -2130,27 +2130,118 @@ function openFattura(pid){
   <div class="modal-f"><button class="btn ghost" onclick="closeModal()">Annulla</button><button class="btn primary" onclick="saveFattura('${pid}')">Aggiungi fattura</button></div></div>`);
 }
 async function saveFattura(pid){
-  const p=DB.partite[pid]; if(!p)return;
+  const p=DB.partite[pid];
+  if(!p) return;
+
   const num=document.getElementById('f_num').value.trim();
   const imp=+document.getElementById('f_imp').value;
-  if(!num){ toast('N. fattura obbligatorio','err'); return; }
-  if(!Number.isFinite(imp)||imp<=0){ toast('Inserisci un importo d’acquisto valido maggiore di zero','err'); return; }
-  const files=document.getElementById('f_pdf').files;
-  const pdf=[];let uploadWarning=false;
-  for(const file of files){
-    let url=null,path=null;
-    if(CLOUD.user&&window.firebaseBridge){
-      try{const safe=file.name.replace(/[^a-zA-Z0-9._-]+/g,'_');path=`registro-mozzanica/fatture/${pid}/${Date.now()}_${safe}`;url=await window.firebaseBridge.uploadFile(file,path);}
-      catch(e){uploadWarning=true;}
-    }else if(file.size)uploadWarning=true;
-    pdf.push({name:file.name,size:file.size,url,path,uploadedAt:url?Date.now():null});
+
+  if(!num){
+    toast('N. fattura obbligatorio','err');
+    return;
   }
+
+  if(!Number.isFinite(imp)||imp<=0){
+    toast('Inserisci un importo d’acquisto valido maggiore di zero','err');
+    return;
+  }
+
+  const files=document.getElementById('f_pdf').files;
+  const pdf=[];
+  let uploadWarning=false;
+
+  for(const file of files){
+    let url=null;
+    let path=null;
+
+    if(CLOUD.user&&window.firebaseBridge){
+      try{
+        const safe=file.name.replace(/[^a-zA-Z0-9._-]+/g,'_');
+        path=`registro-mozzanica/fatture/${pid}/${Date.now()}_${safe}`;
+        url=await window.firebaseBridge.uploadFile(file,path);
+      }catch(e){
+        uploadWarning=true;
+      }
+    }else if(file.size){
+      uploadWarning=true;
+    }
+
+    pdf.push({
+      name:file.name,
+      size:file.size,
+      url,
+      path,
+      uploadedAt:url?Date.now():null
+    });
+  }
+
+  const hadEconomics=!!DB.economics?.partite?.[pid];
+
+  const previousEconomics=hadEconomics
+    ? JSON.parse(JSON.stringify(DB.economics.partite[pid]))
+    : null;
+
+  const eco=ensurePartitaEconomics(p);
+
+  eco.fattureAcquisto=eco.fattureAcquisto||[];
+
+  eco.fattureAcquisto.push({
+    id:uid('ft'),
+    numero:num,
+    data:document.getElementById('f_data').value,
+    importo:imp,
+    pdf
+  });
+
+  if(!save()){
+    if(hadEconomics){
+      DB.economics.partite[pid]=previousEconomics;
+    }else{
+      delete DB.economics.partite[pid];
+    }
+    return;
+  }
+
+  closeModal();
+  render();
+
+  toast(
+    uploadWarning
+      ? 'Fattura salvata; uno o più PDF restano solo come metadati'
+      : 'Fattura aggiunta'+(pdf.length?' con PDF cloud':''),
+    uploadWarning?'err':''
+  );
+}
   p.fattureAcquisto=p.fattureAcquisto||[];
   p.fattureAcquisto.push({id:uid('ft'),numero:num,data:document.getElementById('f_data').value,importo:imp,pdf});
   save(); closeModal(); render(); toast(uploadWarning?'Fattura salvata; uno o più PDF restano solo come metadati':'Fattura aggiunta'+(pdf.length?' con PDF cloud':''),uploadWarning?'err':'');
 }
-function delFattura(pid,fid){ const p=DB.partite[pid]; p.fattureAcquisto=p.fattureAcquisto.filter(f=>f.id!==fid); save(); render(); }
+function delFattura(pid,fid){
+  const p=DB.partite[pid];
+  if(!p) return;
 
+  const hadEconomics=!!DB.economics?.partite?.[pid];
+
+  const previousEconomics=hadEconomics
+    ? JSON.parse(JSON.stringify(DB.economics.partite[pid]))
+    : null;
+
+  const eco=ensurePartitaEconomics(p);
+
+  eco.fattureAcquisto=(eco.fattureAcquisto||[])
+    .filter(f=>f.id!==fid);
+
+  if(!save()){
+    if(hadEconomics){
+      DB.economics.partite[pid]=previousEconomics;
+    }else{
+      delete DB.economics.partite[pid];
+    }
+    return;
+  }
+
+  render();
+}
 /* ---- LAVORAZIONE ---- */
 let LAV_FRAZ=[];
 function openLavorazione(pid){
