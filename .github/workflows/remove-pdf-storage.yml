@@ -1,6 +1,6 @@
 name: Rimuove PDF e Storage
 
-# Secondo avvio dopo allineamento documentazione
+# Terzo avvio con verifica JavaScript sullo script applicativo finale
 on:
   push:
     paths:
@@ -22,12 +22,13 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
           s=Path('public/index.html').read_text(encoding='utf-8')
-          m=re.search(r'<script>([\s\S]*?)</script>\s*</body>', s)
-          if not m:
+          end=s.rfind('</script>')
+          start=s.rfind('<script',0,end)
+          if start<0 or end<0:
               raise SystemExit('script applicativo non trovato')
-          Path('/tmp/app.js').write_text(m.group(1), encoding='utf-8')
+          start=s.find('>',start)+1
+          Path('/tmp/app.js').write_text(s[start:end], encoding='utf-8')
           PY
           node --check /tmp/app.js
       - name: Verifica assenza Storage/PDF
