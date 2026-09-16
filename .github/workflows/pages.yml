@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Preleva i file
         uses: actions/checkout@v6
+      - name: Prepara fatture operatori
+        run: python .github/scripts/operator-invoice-amounts.py
       - name: Configura GitHub Pages
         uses: actions/configure-pages@v5
       - name: Prepara il sito
