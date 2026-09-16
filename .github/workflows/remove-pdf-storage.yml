@@ -1,5 +1,6 @@
 name: Rimuove PDF e Storage
 
+# Secondo avvio dopo allineamento documentazione
 on:
   push:
     paths:
