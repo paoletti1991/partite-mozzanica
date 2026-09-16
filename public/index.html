@@ -2631,15 +2631,27 @@ function saveValor(id){
 function deleteDocumento(documentoId){
   const d=DB.documenti[documentoId];
   if(!d){ toast('Documento non trovato','err'); return; }
-  if(!window.confirm('Stai per eliminare definitivamente questo documento di uscita. Le quantit\u00e0 delle partite coinvolte torneranno disponibili. L\'operazione non \u00e8 reversibile.')) return;
+  if(!window.confirm('Stai per eliminare definitivamente questo documento di uscita. Le quantità delle partite coinvolte torneranno disponibili. L\'operazione non è reversibile.')) return;
+
+  const hadEconomics=!!DB.economics?.documenti?.[documentoId];
+  const previousEconomics=hadEconomics
+    ? JSON.parse(JSON.stringify(DB.economics.documenti[documentoId]))
+    : null;
 
   /* Giacenze, ricavi, utili e valorizzazioni sono calcolati dai documenti presenti:
-     rimuovendo il record vengono quindi ripristinati e ricalcolati automaticamente. */
+     rimuovendo il record operativo e quello economics vengono ripristinati e ricalcolati automaticamente. */
   delete DB.documenti[documentoId];
-  if(!save()){ DB.documenti[documentoId]=d; return; }
+  if(hadEconomics) delete DB.economics.documenti[documentoId];
+
+  if(!save()){
+    DB.documenti[documentoId]=d;
+    if(hadEconomics) DB.economics.documenti[documentoId]=previousEconomics;
+    return;
+  }
+
   closeModal();
   render();
-  toast('Documento eliminato e quantit\u00e0 ripristinate');
+  toast('Documento eliminato e quantità ripristinate');
 }
 
 /* ---------- INIT ---------- */
