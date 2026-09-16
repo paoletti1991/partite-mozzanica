@@ -11,9 +11,9 @@ def rep(old,new,label):
 
 def insert_guard(signature,guard,label):
     global text
-    old=signature+'\n'
-    new=signature+'\n  '+guard+'\n'
-    rep(old,new,label)
+    n=text.count(signature)
+    if n!=1: raise RuntimeError(f'{label}: expected 1 signature, found {n}')
+    text=text.replace(signature,signature+'\n  '+guard,1)
 
 # Local mode remains unrestricted; authenticated cloud users use profile permissions.
 rep("""function hasPermission(section,action='read'){
