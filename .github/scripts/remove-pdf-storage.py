@@ -167,7 +167,9 @@ r = r.replace('6. Attiva **Storage**.\n7. La configurazione della Web App è gi�
 r = r.replace('Il progetto `partite-mozzanica` e l\'UID autorizzato sono già inseriti in `.firebaserc`, `database.rules.json` e `storage.rules`. Le regole negano l\'accesso a tutti gli altri utenti.', 'Il progetto `partite-mozzanica` e l\'UID autorizzato sono già inseriti in `.firebaserc` e `database.rules.json`. Le regole negano l\'accesso a tutti gli altri utenti.')
 r = r.replace('firebase deploy --only database,storage', 'firebase deploy --only database')
 r = r.replace('Per autorizzare altri utenti in futuro, aggiungi il loro UID alle condizioni presenti in entrambi i file delle regole prima di ripubblicarle.', 'Per autorizzare altri utenti in futuro, configura il relativo profilo in `accessControl/users` e mantieni coerenti le regole del Realtime Database.')
-if 'Firebase Storage' in r or 'storage.rules' in r or '--only database,storage' in r:
+r = re.sub(r'\n### Fatture per gli operatori\n.*?(?=\n## 3\.)', '\n', r, flags=re.S)
+r = re.sub(r'\n\s*storageBucket: ".*?",', '', r)
+if 'Firebase Storage' in r or 'storage.rules' in r or '--only database,storage' in r or 'fatture-acquisto/' in r or 'fatture-vendita/' in r:
     raise SystemExit('README contiene ancora riferimenti operativi a Storage')
 rp.write_text(r, encoding='utf-8')
 
