@@ -379,109 +379,121 @@ const branchRefs={
   trasportatori:dbMod.ref(database,'registroMozzanica/trasportatori'),
   counters:dbMod.ref(database,'registroMozzanica/counters'),
   economics:dbMod.ref(database,'registroMozzanica/economics'),
-  audit:dbMod.ref(database,'registroMozzanica/audit')
+  audit:dbMod.ref(database,'registroMozzanica/audit'),
+  meta:dbMod.ref(database,'registroMozzanica/meta')
 };
     window.firebaseBridge={
       configured:true,
       onAuth(callback){return authMod.onAuthStateChanged(auth,callback);},
       signIn(email,password){return authMod.signInWithEmailAndPassword(auth,email,password);},
       signOut(){return authMod.signOut(auth);},
-      async readUserProfile(uid){const snap=await dbMod.get(dbMod.ref(database,'accessControl/users/'+uid));return snap.exists()?snap.val():null;},
-     async migrateLegacyToBranches(){
-  const legacySnap=await dbMod.get(dataRef);
+      async readUserProfile(uid){
+        const snap=await dbMod.get(dbMod.ref(database,'accessControl/users/'+uid));
+        return snap.exists()?snap.val():null;
+      },
+      async readMeta(){
+        const snap=await dbMod.get(dbMod.ref(database,'registroMozzanica/meta'));
+        return snap.exists()?snap.val():null;
+      },
+      async readBranch(section){
+        const ref=branchRefs[section];
+        if(!ref) throw new Error('Sezione Firebase non valida: '+section);
+        const snap=await dbMod.get(ref);
+        return snap.exists()?snap.val():null;
+      },
+      listenBranch(section,callback){
+        const ref=branchRefs[section];
+        if(!ref) throw new Error('Sezione Firebase non valida: '+section);
+        return dbMod.onValue(ref,snap=>callback(snap.exists()?snap.val():null));
+      },
+      async writeBranchUpdates(updates,auditEntries=[]){
+        const payload={...(updates||{})};
+        (auditEntries||[]).forEach(entry=>{
+          const key=dbMod.push(branchRefs.audit).key;
+          payload['audit/'+key]={
+            ...entry,
+            uid:auth.currentUser?.uid||'',
+            at:dbMod.serverTimestamp()
+          };
+        });
+        if(Object.keys(payload).length) await dbMod.update(registroRef,payload);
+      },
+      async nextCounter(year){
+        const ref=dbMod.ref(database,'registroMozzanica/counters/'+String(year));
+        const result=await dbMod.runTransaction(ref,current=>(Number(current)||0)+1);
+        if(!result.committed) throw new Error('Progressivo non assegnato');
+        return +result.snapshot.val();
+      },
+      async migrateLegacyToBranches(){
+        const legacySnap=await dbMod.get(dataRef);
+        if(!legacySnap.exists()) throw new Error('Archivio precedente non trovato');
 
-  if(!legacySnap.exists()){
-    throw new Error('Archivio precedente non trovato');
-  }
+        const wrapper=legacySnap.val();
+        const legacy=wrapper?.data;
+        if(!legacy) throw new Error('Dati precedenti non trovati');
 
-  const wrapper=legacySnap.val();
-  const legacy=wrapper?.data;
+        const destinationSections=['partite','documenti','produttori','trasportatori','counters','economics'];
+        const existing=await Promise.all(destinationSections.map(section=>dbMod.get(branchRefs[section])));
+        if(existing.some(snap=>snap.exists())){
+          throw new Error('Migrazione interrotta: una o più nuove sezioni contengono già dati');
+        }
 
-  if(!legacy){
-    throw new Error('Dati precedenti non trovati');
-  }
+        const partiteOperative={};
+        const documentiOperativi={};
+        const economics={partite:{},documenti:{}};
+        const counters=JSON.parse(JSON.stringify(legacy.counters||{}));
 
-  const destinationSections=[
-    'partite',
-    'documenti',
-    'produttori',
-    'trasportatori',
-    'counters',
-    'economics'
-  ];
+        Object.entries(legacy.partite||{}).forEach(([id,source])=>{
+          const p=JSON.parse(JSON.stringify(source));
+          const stored=legacy.economics?.partite?.[id]||{};
+          economics.partite[id]={
+            fattureAcquisto:stored.fattureAcquisto ?? p.fattureAcquisto ?? [],
+            definizioniFornitore:stored.definizioniFornitore ?? p.definizioniFornitore ?? [],
+            trasportoIngresso:stored.trasportoIngresso ?? p.trasportoIngresso ?? null
+          };
+          delete p.fattureAcquisto;
+          delete p.definizioniFornitore;
+          delete p.trasportoIngresso;
+          partiteOperative[id]=p;
+          const year=String(p.anno||'');
+          if(year) counters[year]=Math.max(+counters[year]||0,+p.num||0);
+        });
 
-  const existing=await Promise.all(
-    destinationSections.map(section=>dbMod.get(branchRefs[section]))
-  );
+        Object.entries(legacy.documenti||{}).forEach(([id,source])=>{
+          const d=JSON.parse(JSON.stringify(source));
+          const stored=legacy.economics?.documenti?.[id]||{};
+          economics.documenti[id]={
+            trasportoCosto:stored.trasportoCosto ?? d.trasportoCosto ?? 0,
+            valorizzazione:stored.valorizzazione ?? d.valorizzazione ?? null,
+            naturaEconomicaBozza:stored.naturaEconomicaBozza ?? d.naturaEconomicaBozza ?? null,
+            fatturaCliente:stored.fatturaCliente ?? d.fatturaCliente ?? null,
+            fatturaCosto:stored.fatturaCosto ?? d.fatturaCosto ?? null
+          };
+          delete d.trasportoCosto;
+          delete d.valorizzazione;
+          delete d.naturaEconomicaBozza;
+          delete d.fatturaCliente;
+          delete d.fatturaCosto;
+          documentiOperativi[id]=d;
+        });
 
-  if(existing.some(snap=>snap.exists())){
-    throw new Error(
-      'Migrazione interrotta: una o più nuove sezioni contengono già dati'
-    );
-  }
+        await dbMod.update(registroRef,{
+          partite:partiteOperative,
+          documenti:documentiOperativi,
+          produttori:legacy.produttori||{},
+          trasportatori:legacy.trasportatori||{},
+          counters,
+          economics,
+          meta:{schemaVersion:3,migratedAt:dbMod.serverTimestamp()}
+        });
 
-  const partiteOperative={};
-  const documentiOperativi={};
-
-  const economics={
-    partite:{},
-    documenti:{}
-  };
-
-  Object.entries(legacy.partite||{}).forEach(([id,source])=>{
-    const p=JSON.parse(JSON.stringify(source));
-
-    economics.partite[id]={
-      fattureAcquisto:p.fattureAcquisto||[],
-      definizioniFornitore:p.definizioniFornitore||[],
-      trasportoIngresso:p.trasportoIngresso||null
-    };
-
-    delete p.fattureAcquisto;
-    delete p.definizioniFornitore;
-    delete p.trasportoIngresso;
-
-    partiteOperative[id]=p;
-  });
-
-  Object.entries(legacy.documenti||{}).forEach(([id,source])=>{
-    const d=JSON.parse(JSON.stringify(source));
-
-    economics.documenti[id]={
-      trasportoCosto:d.trasportoCosto||0,
-      valorizzazione:d.valorizzazione||null,
-      naturaEconomicaBozza:d.naturaEconomicaBozza||null,
-      fatturaCliente:d.fatturaCliente||null,
-      fatturaCosto:d.fatturaCosto||null
-    };
-
-    delete d.trasportoCosto;
-    delete d.valorizzazione;
-    delete d.naturaEconomicaBozza;
-    delete d.fatturaCliente;
-    delete d.fatturaCosto;
-
-    documentiOperativi[id]=d;
-  });
-
-  const updates={
-    partite:partiteOperative,
-    documenti:documentiOperativi,
-    produttori:legacy.produttori||{},
-    trasportatori:legacy.trasportatori||{},
-    counters:legacy.counters||{},
-    economics
-  };
-
-  await dbMod.update(registroRef,updates);
-
-  return {
-    partite:Object.keys(partiteOperative).length,
-    documenti:Object.keys(documentiOperativi).length,
-    produttori:Object.keys(legacy.produttori||{}).length,
-    trasportatori:Object.keys(legacy.trasportatori||{}).length
-  };
-},
+        return {
+          partite:Object.keys(partiteOperative).length,
+          documenti:Object.keys(documentiOperativi).length,
+          produttori:Object.keys(legacy.produttori||{}).length,
+          trasportatori:Object.keys(legacy.trasportatori||{}).length
+        };
+      },
       async read(){const snap=await dbMod.get(dataRef);return snap.exists()?snap.val():null;},
       write(data){return dbMod.set(dataRef,{data,updatedAt:dbMod.serverTimestamp(),updatedBy:auth.currentUser?.uid||''});},
       listen(callback){return dbMod.onValue(dataRef,snap=>callback(snap.exists()?snap.val():null));},
@@ -507,7 +519,7 @@ const branchRefs={
 const FB_ON = !!(firebaseConfig&&firebaseConfig.apiKey&&firebaseConfig.projectId&&firebaseConfig.databaseURL);
 const LS_KEY='valmet_raee_v1', LS_PREV_KEY='valmet_raee_previous_v1';
 let DB=emptyDB();
-let CLOUD={configured:FB_ON,user:null,profile:null,ready:false,syncing:false,lastSync:0,error:'',unsubscribe:null};
+let CLOUD={configured:FB_ON,user:null,profile:null,ready:false,syncing:false,lastSync:0,error:'',unsubscribe:null,branchUnsubscribers:[],mode:'local',syncedDB:null,saveInFlight:false,savePending:false};
 let cloudSaveTimer=null;
 
 function emptyDB(){
@@ -552,6 +564,10 @@ function normalizeDB(data){
     };
   }
 
+  if(FB_ON && CLOUD.user && !hasPermission('economics','read')){
+    return {fattureAcquisto:[],definizioniFornitore:[],trasportoIngresso:null};
+  }
+
   const stored=DB.economics?.partite?.[p.id];
 
   if(stored){
@@ -579,6 +595,10 @@ function documentoEconomicsData(d){
       fatturaCliente:null,
       fatturaCosto:null
     };
+  }
+
+  if(FB_ON && CLOUD.user && !hasPermission('economics','read')){
+    return {trasportoCosto:0,valorizzazione:null,naturaEconomicaBozza:null,fatturaCliente:null,fatturaCosto:null};
   }
 
   const stored=DB.economics?.documenti?.[d.id];
@@ -655,32 +675,106 @@ function ensureDocumentoEconomics(d){
   return DB.economics.documenti[d.id];
 }
 function hasBusinessData(data){return !!(data&&(Object.keys(data.partite||{}).length||Object.keys(data.documenti||{}).length||Object.keys(data.produttori||{}).length||Object.keys(data.trasportatori||{}).length));}
-function load(){
-  try{const raw=localStorage.getItem(LS_KEY);if(raw)DB=normalizeDB(JSON.parse(raw));else DB=emptyDB();}catch(e){DB=emptyDB();}
+function cloneData(value){return JSON.parse(JSON.stringify(value));}
+function localKey(base){return (FB_ON&&CLOUD.user?.uid)?base+'_'+CLOUD.user.uid:base;}
+function load(useLegacyFallback=false){
+  try{
+    const key=localKey(LS_KEY);
+    let raw=localStorage.getItem(key);
+    if(!raw&&useLegacyFallback&&key!==LS_KEY) raw=localStorage.getItem(LS_KEY);
+    DB=raw?normalizeDB(JSON.parse(raw)):emptyDB();
+  }catch(e){DB=emptyDB();}
 }
 function persistLocal(data,keepPrevious){
   try{
-    const next=JSON.stringify(data), current=localStorage.getItem(LS_KEY);
-    if(keepPrevious&&current&&current!==next)localStorage.setItem(LS_PREV_KEY,current);
-    localStorage.setItem(LS_KEY,next);return true;
+    const key=localKey(LS_KEY), prevKey=localKey(LS_PREV_KEY);
+    const next=JSON.stringify(data), current=localStorage.getItem(key);
+    if(keepPrevious&&current&&current!==next)localStorage.setItem(prevKey,current);
+    localStorage.setItem(key,next);return true;
   }catch(e){toast('Copia locale non riuscita: spazio browser insufficiente','err');return false;}
+}
+function permissionSection(section){return section==='documenti'?'uscite':section;}
+function canMutateSection(section,action){return isAdmin()||hasPermission(permissionSection(section),action);}
+function changedRecords(base,next){
+  const ids=new Set([...Object.keys(base||{}),...Object.keys(next||{})]);
+  const out=[];
+  ids.forEach(id=>{
+    const before=base?.[id], after=next?.[id];
+    if(JSON.stringify(before)===JSON.stringify(after)) return;
+    const action=before===undefined?'create':after===undefined?'delete':'update';
+    out.push({id,before,after,action});
+  });
+  return out;
+}
+function granularChanges(base,next){
+  const sections=['partite','documenti','produttori','trasportatori','economics'];
+  const updates={},audits=[],denied=[];
+  sections.forEach(section=>{
+    if(section==='economics'){
+      ['partite','documenti'].forEach(kind=>{
+        changedRecords(base?.economics?.[kind]||{},next?.economics?.[kind]||{}).forEach(ch=>{
+          if(!canMutateSection('economics',ch.action)){denied.push('economics.'+kind+':'+ch.action);return;}
+          updates['economics/'+kind+'/'+ch.id]=ch.after===undefined?null:cloneData(ch.after);
+          audits.push({section:'economics/'+kind,recordId:ch.id,action:ch.action});
+        });
+      });
+      return;
+    }
+    changedRecords(base?.[section]||{},next?.[section]||{}).forEach(ch=>{
+      if(!canMutateSection(section,ch.action)){denied.push(section+':'+ch.action);return;}
+      updates[section+'/'+ch.id]=ch.after===undefined?null:cloneData(ch.after);
+      audits.push({section,recordId:ch.id,action:ch.action});
+    });
+  });
+  return {updates,audits,denied};
 }
 function save(){
   DB=normalizeDB(DB);DB._meta.updatedAt=Date.now();DB._meta.device='browser';
+  if(CLOUD.user&&CLOUD.mode==='branches'){
+    const check=granularChanges(CLOUD.syncedDB||emptyDB(),DB);
+    if(check.denied.length){toast('Operazione non autorizzata per questo utente','err');return false;}
+  }
   if(!persistLocal(DB,true))return false;
-  queueCloudSave();updateStoreStatus();return true;
+  if(CLOUD.user&&CLOUD.mode==='branches')queueGranularSave();
+  else queueCloudSave();
+  updateStoreStatus();return true;
 }
 function queueCloudSave(){
-  if(!CLOUD.user||!window.firebaseBridge)return;
+  if(!CLOUD.user||!window.firebaseBridge||!isAdmin()||CLOUD.mode!=='legacy')return;
   clearTimeout(cloudSaveTimer);cloudSaveTimer=setTimeout(pushCloud,450);
 }
 async function pushCloud(){
-  if(!CLOUD.user||!window.firebaseBridge)return;
+  if(!CLOUD.user||!window.firebaseBridge||!isAdmin()||CLOUD.mode!=='legacy')return;
   CLOUD.syncing=true;CLOUD.error='';updateStoreStatus();
-  const payload=JSON.parse(JSON.stringify(DB));
+  const payload=cloneData(DB);
   try{await window.firebaseBridge.write(payload);CLOUD.lastSync=Date.now();}
   catch(e){CLOUD.error='Sincronizzazione non riuscita; dati conservati in locale';}
   finally{CLOUD.syncing=false;updateStoreStatus();}
+}
+function queueGranularSave(){
+  if(!CLOUD.user||!window.firebaseBridge||CLOUD.mode!=='branches')return;
+  clearTimeout(cloudSaveTimer);cloudSaveTimer=setTimeout(flushGranularSave,300);
+}
+async function flushGranularSave(){
+  if(CLOUD.mode!=='branches'||!CLOUD.user)return;
+  if(CLOUD.saveInFlight){CLOUD.savePending=true;return;}
+  const base=cloneData(CLOUD.syncedDB||emptyDB()), next=cloneData(DB);
+  const changes=granularChanges(base,next);
+  if(changes.denied.length){CLOUD.error='Modifica non autorizzata';updateStoreStatus();return;}
+  if(!Object.keys(changes.updates).length)return;
+  CLOUD.saveInFlight=true;CLOUD.syncing=true;CLOUD.error='';updateStoreStatus();
+  try{
+    await window.firebaseBridge.writeBranchUpdates(changes.updates,changes.audits);
+    CLOUD.syncedDB=cloneData(next);
+    CLOUD.lastSync=Date.now();
+  }catch(e){
+    CLOUD.error='Sincronizzazione non riuscita; modifiche conservate in locale';
+  }finally{
+    CLOUD.saveInFlight=false;CLOUD.syncing=false;updateStoreStatus();
+    if(CLOUD.savePending||JSON.stringify(DB)!==JSON.stringify(CLOUD.syncedDB)){
+      CLOUD.savePending=false;queueGranularSave();
+    }
+  }
 }
 function applyCloudData(wrapper){
   if(!wrapper||!wrapper.data)return false;
@@ -688,13 +782,13 @@ function applyCloudData(wrapper){
   DB=incoming;persistLocal(DB,true);render();return true;
 }
 async function syncInitialCloud(){
-  if(!CLOUD.user||!window.firebaseBridge)return;
-  CLOUD.syncing=true;updateStoreStatus();
+  if(!CLOUD.user||!window.firebaseBridge||!isAdmin())return;
+  CLOUD.mode='legacy';CLOUD.syncing=true;updateStoreStatus();
   try{
     const remote=await window.firebaseBridge.read();
     const remoteTs=+(remote?.updatedAt||remote?.data?._meta?.updatedAt||0), localTs=+(DB._meta?.updatedAt||0);
     if(remote?.data&&(!hasBusinessData(DB)||remoteTs>localTs))applyCloudData(remote);
-    else if(hasBusinessData(DB)||!remote?.data)await window.firebaseBridge.write(JSON.parse(JSON.stringify(DB)));
+    else if(hasBusinessData(DB)||!remote?.data)await window.firebaseBridge.write(cloneData(DB));
     CLOUD.lastSync=Date.now();CLOUD.error='';
     if(CLOUD.unsubscribe)CLOUD.unsubscribe();
     CLOUD.unsubscribe=window.firebaseBridge.listen(next=>{
@@ -704,62 +798,91 @@ async function syncInitialCloud(){
   }catch(e){CLOUD.error='Accesso cloud non disponibile; copia locale attiva';}
   finally{CLOUD.syncing=false;updateStoreStatus();}
 }
+function branchSections(){
+  const out=['partite','documenti','produttori','trasportatori','counters'];
+  if(hasPermission('economics','read'))out.push('economics');
+  return out;
+}
+function clearBranchListeners(){
+  (CLOUD.branchUnsubscribers||[]).forEach(fn=>{try{fn();}catch(e){}});
+  CLOUD.branchUnsubscribers=[];
+}
+function applyBranch(section,value,doRender=true){
+  if(section==='economics'){
+    DB.economics=value||{partite:{},documenti:{}};
+    DB.economics.partite=DB.economics.partite||{};
+    DB.economics.documenti=DB.economics.documenti||{};
+  }else DB[section]=value||{};
+  DB=normalizeDB(DB);
+  if(CLOUD.syncedDB){
+    if(section==='economics')CLOUD.syncedDB.economics=cloneData(DB.economics);
+    else CLOUD.syncedDB[section]=cloneData(DB[section]);
+  }
+  persistLocal(DB,false);
+  if(doRender)render();
+}
+async function syncBranchCloud(){
+  CLOUD.mode='branches';CLOUD.syncing=true;CLOUD.error='';updateStoreStatus();
+  clearBranchListeners();
+  try{
+    const sections=branchSections();
+    const values=await Promise.all(sections.map(s=>window.firebaseBridge.readBranch(s)));
+    DB=emptyDB();
+    sections.forEach((s,i)=>applyBranch(s,values[i],false));
+    CLOUD.syncedDB=cloneData(DB);
+    persistLocal(DB,false);
+    sections.forEach(section=>{
+      const unsub=window.firebaseBridge.listenBranch(section,value=>{
+        if(CLOUD.saveInFlight||cloudSaveTimer)return;
+        applyBranch(section,value,true);
+      });
+      CLOUD.branchUnsubscribers.push(unsub);
+    });
+    CLOUD.lastSync=Date.now();render();
+  }catch(e){
+    load(false);
+    CLOUD.syncedDB=cloneData(DB);
+    CLOUD.error='Dati cloud non disponibili; visualizzata la cache di questo utente';
+    render();
+  }finally{CLOUD.syncing=false;updateStoreStatus();}
+}
 function initCloudBridge(){
   if(CLOUD.ready)return;
   if(!window.firebaseBridge){updateStoreStatus();return;}
   CLOUD.ready=true;
-
   window.firebaseBridge.onAuth(async user=>{
-    CLOUD.user=user||null;
-    CLOUD.profile=null;
-    CLOUD.error='';
-
-    if(CLOUD.unsubscribe){
-      CLOUD.unsubscribe();
-      CLOUD.unsubscribe=null;
-    }
-
-    if(!user){
-      DB=emptyDB();
-      updateStoreStatus();
-      render();
-      return;
-    }
-
+    CLOUD.user=user||null;CLOUD.profile=null;CLOUD.error='';CLOUD.syncedDB=null;CLOUD.mode='local';
+    clearTimeout(cloudSaveTimer);cloudSaveTimer=null;
+    if(CLOUD.unsubscribe){CLOUD.unsubscribe();CLOUD.unsubscribe=null;}
+    clearBranchListeners();
+    if(!user){DB=emptyDB();updateStoreStatus();render();return;}
     try{
       const profile=await window.firebaseBridge.readUserProfile(user.uid);
-
-      if(!profile || profile.active!==true){
-        DB=emptyDB();
-        CLOUD.error='Utente non autorizzato';
-        updateStoreStatus();
-        render();
-        return;
-      }
-
+      if(!profile||profile.active!==true){DB=emptyDB();CLOUD.error='Utente non autorizzato';updateStoreStatus();render();return;}
       CLOUD.profile=profile;
-
-      if(profile.role==='admin'){
+      const meta=await window.firebaseBridge.readMeta();
+      if(+meta?.schemaVersion>=3){
+        await syncBranchCloud();
+      }else if(isAdmin()){
+        load(true);
         await syncInitialCloud();
       }else{
-        DB=emptyDB();
+        DB=emptyDB();CLOUD.mode='blocked';CLOUD.error='Archivio multiutente non ancora migrato dall’amministratore';render();
       }
-
       updateStoreStatus();
-      render();
-
     }catch(e){
-      DB=emptyDB();
-      CLOUD.error='Profilo utente non disponibile';
-      updateStoreStatus();
-      render();
+      DB=emptyDB();CLOUD.error='Profilo o archivio utente non disponibile';updateStoreStatus();render();
     }
   });
 }
 window.addEventListener('firebase-bridge-ready',e=>{
   if(e.detail?.ok)initCloudBridge();else{CLOUD.ready=true;if(!e.detail?.localOnly)CLOUD.error='Firebase non raggiungibile';updateStoreStatus();}
 });
-window.addEventListener('online',()=>{if(CLOUD.user)pushCloud();});
+window.addEventListener('online',()=>{
+  if(!CLOUD.user)return;
+  if(CLOUD.mode==='legacy'&&isAdmin())pushCloud();
+  if(CLOUD.mode==='branches')queueGranularSave();
+});
 function uid(p){ return (p||'id')+'_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 function isAdmin(){
   return CLOUD.profile?.active===true && CLOUD.profile?.role==='admin';
@@ -1834,7 +1957,7 @@ function openDataManager(){
     <div class="row2">
       <button class="btn primary" onclick="exportBackup()">Scarica backup JSON</button>
       <button class="btn" onclick="chooseBackupFile()">Importa backup JSON</button>
-      <button class="btn" onclick="restorePreviousLocal()" ${localStorage.getItem(LS_PREV_KEY)?'':'disabled'}>Ripristina copia precedente</button>
+      <button class="btn" onclick="restorePreviousLocal()" ${localStorage.getItem(localKey(LS_PREV_KEY))?'':'disabled'}>Ripristina copia precedente</button>
       ${FB_ON?(CLOUD.user?'<button class="btn" onclick="pushCloud();closeModal();toast(\'Sincronizzazione avviata\')">Sincronizza ora</button>':'<button class="btn" onclick="openCloudLogin()">Accedi a Firebase</button>'):'<button class="btn" disabled>Configura Firebase per il cloud</button>'}
     </div>
   </div>
@@ -1858,7 +1981,7 @@ async function importBackupFile(input){
   finally{input.value='';}
 }
 function restorePreviousLocal(){
-  const raw=localStorage.getItem(LS_PREV_KEY);if(!raw){toast('Nessuna copia precedente disponibile','err');return;}
+  const raw=localStorage.getItem(localKey(LS_PREV_KEY));if(!raw){toast('Nessuna copia precedente disponibile','err');return;}
   if(!window.confirm('Ripristinare la copia locale precedente? La situazione attuale diventerà a sua volta la copia di sicurezza.'))return;
   try{DB=normalizeDB(JSON.parse(raw));if(!save())return;closeModal();render();toast('Copia locale precedente ripristinata');}catch(e){toast('Copia precedente non leggibile','err');}
 }
@@ -2041,9 +2164,13 @@ function openPartita(){
   document.getElementById('view')._after=null; bindCerCombo('pcer','pcer_val');
 }
 document.getElementById('view')._after=null;
-function savePartita(anno){
+async function savePartita(anno){
   anno=+anno||YEAR;
-  const num=nextNum(anno);
+  let num=nextNum(anno);
+  if(CLOUD.user&&CLOUD.mode==='branches'){
+    try{num=await window.firebaseBridge.nextCounter(anno);DB.counters[String(anno)]=num;}
+    catch(e){toast('Impossibile assegnare il progressivo della partita','err');return;}
+  }
   const cer=document.getElementById('pcer_val').value;
   const kgv=+document.getElementById('p_kg').value;
   const prod=document.getElementById('p_prod').value;
@@ -2667,8 +2794,9 @@ function deleteDocumento(documentoId){
 }
 
 /* ---------- INIT ---------- */
-load();
 if(location.hash){ const [v,id]=location.hash.slice(1).split('/'); ROUTE={view:v||'dash',id:id||null}; }
+if(!FB_ON) load();
+else DB=emptyDB();
 render();
 if(window.firebaseBridge)initCloudBridge();
 

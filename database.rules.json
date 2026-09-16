@@ -2,7 +2,6 @@
   "rules": {
     ".read": false,
     ".write": false,
-
     "accessControl": {
       "users": {
         "$uid": {
@@ -11,10 +10,60 @@
         }
       }
     },
-
     "registroMozzanica": {
-      ".read": "auth != null && auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1'",
-      ".write": "auth != null && auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1'"
+      "current": {
+        ".read": "auth != null && auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1'",
+        ".write": "auth != null && auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1'"
+      },
+      "meta": {
+        ".read": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true",
+        ".write": "auth != null && auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1'"
+      },
+      "partite": {
+        ".read": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true && (auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1' || root.child('accessControl/users').child(auth.uid).child('permissions/partite/read').val() === true)",
+        "$id": {
+          ".write": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true && (auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1' || (!data.exists() && newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/partite/create').val() === true) || (data.exists() && newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/partite/update').val() === true) || (data.exists() && !newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/partite/delete').val() === true))"
+        }
+      },
+      "documenti": {
+        ".read": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true && (auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1' || root.child('accessControl/users').child(auth.uid).child('permissions/uscite/read').val() === true)",
+        "$id": {
+          ".write": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true && (auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1' || (!data.exists() && newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/uscite/create').val() === true) || (data.exists() && newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/uscite/update').val() === true) || (data.exists() && !newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/uscite/delete').val() === true))"
+        }
+      },
+      "produttori": {
+        ".read": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true && (auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1' || root.child('accessControl/users').child(auth.uid).child('permissions/produttori/read').val() === true)",
+        "$id": {
+          ".write": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true && (auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1' || (!data.exists() && newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/produttori/create').val() === true) || (data.exists() && newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/produttori/update').val() === true) || (data.exists() && !newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/produttori/delete').val() === true))"
+        }
+      },
+      "trasportatori": {
+        ".read": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true && (auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1' || root.child('accessControl/users').child(auth.uid).child('permissions/trasportatori/read').val() === true)",
+        "$id": {
+          ".write": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true && (auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1' || (!data.exists() && newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/trasportatori/create').val() === true) || (data.exists() && newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/trasportatori/update').val() === true) || (data.exists() && !newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/trasportatori/delete').val() === true))"
+        }
+      },
+      "counters": {
+        ".read": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true && (auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1' || root.child('accessControl/users').child(auth.uid).child('permissions/partite/read').val() === true)",
+        "$year": {
+          ".write": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true && (auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1' || root.child('accessControl/users').child(auth.uid).child('permissions/partite/create').val() === true)",
+          ".validate": "newData.isNumber() && newData.val() === (data.exists() ? data.val() + 1 : 1)"
+        }
+      },
+      "economics": {
+        ".read": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true && (auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1' || root.child('accessControl/users').child(auth.uid).child('permissions/economics/read').val() === true)",
+        "$kind": {
+          "$id": {
+            ".write": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true && (auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1' || (!data.exists() && newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/economics/create').val() === true) || (data.exists() && newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/economics/update').val() === true) || (data.exists() && !newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/economics/delete').val() === true))"
+          }
+        }
+      },
+      "audit": {
+        ".read": "auth != null && auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1'",
+        "$id": {
+          ".write": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true && !data.exists() && newData.exists() && newData.child('uid').val() === auth.uid"
+        }
+      }
     }
   }
 }
