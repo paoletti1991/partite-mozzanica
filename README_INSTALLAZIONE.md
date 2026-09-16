@@ -4,7 +4,6 @@ Questa versione usa:
 
 - **Firebase Realtime Database** per conservare i dati operativi;
 - **Firebase Authentication** per limitare l'accesso agli utenti autorizzati;
-- **Firebase Storage** per i PDF delle fatture;
 - **GitHub Pages** per pubblicare il programma;
 - una **copia locale automatica** nel browser usato;
 - una **copia locale precedente**, ripristinabile dal programma;
@@ -19,8 +18,7 @@ GitHub ospita il programma, mentre i dati restano in Firebase. La configurazione
 3. Attiva **Authentication > Metodo di accesso > Email/password**.
 4. In **Authentication > Utenti**, crea manualmente gli account autorizzati. Il programma non consente la registrazione pubblica.
 5. Crea un **Realtime Database**.
-6. Attiva **Storage**.
-7. La configurazione della Web App è già inserita in `public/firebase-config.js`.
+6. La configurazione della Web App è già inserita in `public/firebase-config.js`.
 
 Esempio:
 
@@ -30,7 +28,6 @@ window.REGISTRO_FIREBASE_CONFIG = {
   authDomain: "nome-progetto.firebaseapp.com",
   databaseURL: "https://nome-progetto-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "nome-progetto",
-  storageBucket: "nome-progetto.firebasestorage.app",
   messagingSenderId: "...",
   appId: "..."
 };
@@ -45,28 +42,16 @@ npm install -g firebase-tools
 firebase login
 ```
 
-Il progetto `partite-mozzanica` e l'UID autorizzato sono già inseriti in `.firebaserc`, `database.rules.json` e `storage.rules`. Le regole negano l'accesso a tutti gli altri utenti.
+Il progetto `partite-mozzanica` e l'UID autorizzato sono già inseriti in `.firebaserc` e `database.rules.json`. Le regole negano l'accesso a tutti gli altri utenti.
 
 Pubblica le regole:
 
 ```text
-firebase deploy --only database,storage
+firebase deploy --only database
 ```
 
-Per autorizzare altri utenti in futuro, aggiungi il loro UID alle condizioni presenti in entrambi i file delle regole prima di ripubblicarle.
+Per autorizzare altri utenti in futuro, configura il relativo profilo in `accessControl/users` e mantieni coerenti le regole del Realtime Database.
 
-### Fatture per gli operatori
-
-Gli operatori autorizzati possono caricare PDF di fatture d'acquisto e di vendita nei percorsi dedicati di Firebase Storage. I metadati documentali salvati nel Realtime Database contengono solo numero, data e collegamento al PDF: importi, costi, ricavi, margini e report economici restano esclusi dai profili operatore.
-
-I percorsi Storage dedicati sono:
-
-```text
-registro-mozzanica/fatture-acquisto/
-registro-mozzanica/fatture-vendita/
-```
-
-Le regole Storage limitano questi percorsi agli account operatore autorizzati e all'amministratore, accettando solo PDF fino a 15 MB. Tutto il resto di `registro-mozzanica/` rimane riservato all'amministratore.
 
 ## 3. Pubblicare su GitHub Pages
 
