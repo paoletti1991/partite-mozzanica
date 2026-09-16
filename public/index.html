@@ -2432,6 +2432,7 @@ function saveDocumento(){
   const dest=document.getElementById('d_dest').value.trim();
   if(!num){ toast('N. documento obbligatorio','err'); return; }
   if(!dest){ toast('Destinatario obbligatorio','err'); return; }
+
   const righe=[];
   document.querySelectorAll('#d_disp .selrow').forEach((row,i)=>{
     const sel=document.getElementById('sel_'+i); if(!sel||!sel.checked)return;
@@ -2440,18 +2441,50 @@ function saveDocumento(){
     let kgv=saldo?max:+inp.value;
     if(!kgv||kgv<=0){ return; }
     if(kgv>max+0.001){ toast('Kg oltre la giacenza per '+DB.partite[sel.dataset.pid].num+'-Raee','err'); kgv=null; return; }
-    righe.push({id:uid('riga'),partitaId:sel.dataset.pid, lotto:sel.dataset.lot, kg:kgv, saldo});
+    righe.push({id:uid('riga'),partitaId:sel.dataset.pid,lotto:sel.dataset.lot,kg:kgv,saldo});
   });
+
   if(!righe.length){ toast('Seleziona almeno una partita con kg validi','err'); return; }
+
   const traspId=document.getElementById('d_trasp').value;
   const interno=traspId&&DB.trasportatori[traspId]?DB.trasportatori[traspId].interno:false;
   const id=uid('doc');
-  DB.documenti[id]={ id, tipo:document.getElementById('d_tipo').value, numero:num,
-    data:document.getElementById('d_data').value, destinatario:dest,
-    trasportatoreId:traspId||null, trasportoInterno:!!interno,
-    trasportoCosto:interno?0:(+document.getElementById('d_tcost').value||0),
-    righe, valorizzazione:null, naturaEconomicaBozza:'ricavo', fatturaCliente:null, fatturaCosto:null, createdAt:Date.now() };
-  save(); closeModal(); openDocView(id); toast('Documento creato');
+
+  DB.documenti[id]={
+    id,
+    tipo:document.getElementById('d_tipo').value,
+    numero:num,
+    data:document.getElementById('d_data').value,
+    destinatario:dest,
+    trasportatoreId:traspId||null,
+    trasportoInterno:!!interno,
+    righe,
+    createdAt:Date.now()
+  };
+
+  const createEconomics=hasPermission('economics','read');
+
+  if(createEconomics){
+    DB.economics=DB.economics||{};
+    DB.economics.documenti=DB.economics.documenti||{};
+    DB.economics.documenti[id]={
+      trasportoCosto:interno?0:(+document.getElementById('d_tcost').value||0),
+      valorizzazione:null,
+      naturaEconomicaBozza:'ricavo',
+      fatturaCliente:null,
+      fatturaCosto:null
+    };
+  }
+
+  if(!save()){
+    delete DB.documenti[id];
+    if(createEconomics) delete DB.economics.documenti[id];
+    return;
+  }
+
+  closeModal();
+  openDocView(id);
+  toast('Documento creato');
 }
 
 /* ---- VISTA DOCUMENTO + VALORIZZAZIONE ---- */
