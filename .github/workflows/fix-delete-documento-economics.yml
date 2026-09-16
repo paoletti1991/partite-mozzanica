@@ -5,6 +5,7 @@ on:
     branches: ["multi"]
     paths:
       - ".github/workflows/fix-delete-documento-economics.yml"
+      - ".github/scripts/fix-delete-documento-economics.py"
 
 permissions:
   contents: write
