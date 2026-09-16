@@ -2362,9 +2362,9 @@ function deletePartita(partitaId){
   const reasons=[];
   const docs=Object.values(DB.documenti).filter(d=>(d.righe||[]).some(r=>r.partitaId===partitaId));
   if((p.lavorazioni||[]).length) reasons.push('sono presenti lavorazioni interne');
-  if(docs.length) reasons.push('\u00e8 utilizzata in '+docs.length+' document'+(docs.length===1?'o di uscita':'i di uscita'));
+  if(docs.length) reasons.push('è utilizzata in '+docs.length+' document'+(docs.length===1?'o di uscita':'i di uscita'));
 
-  const otherStores=Object.keys(DB).filter(k=>!['partite','documenti','counters'].includes(k) && containsReference(DB[k],partitaId));
+  const otherStores=Object.keys(DB).filter(k=>!['partite','documenti','counters','economics'].includes(k) && containsReference(DB[k],partitaId));
   if(otherStores.length) reasons.push('esistono altri record collegati ('+otherStores.join(', ')+')');
 
   if(reasons.length){
@@ -2377,10 +2377,22 @@ function deletePartita(partitaId){
     return;
   }
 
-  if(!window.confirm('Stai per eliminare definitivamente questa partita, incluse fatture, formulari e trasporto di ingresso collegati. L\'operazione non \u00e8 reversibile.')) return;
+  if(!window.confirm('Stai per eliminare definitivamente questa partita, incluse fatture, formulari e trasporto di ingresso collegati. L\'operazione non è reversibile.')) return;
+
+  const hadEconomics=!!DB.economics?.partite?.[partitaId];
+  const previousEconomics=hadEconomics
+    ? JSON.parse(JSON.stringify(DB.economics.partite[partitaId]))
+    : null;
 
   delete DB.partite[partitaId];
-  if(!save()){ DB.partite[partitaId]=p; return; }
+  if(hadEconomics) delete DB.economics.partite[partitaId];
+
+  if(!save()){
+    DB.partite[partitaId]=p;
+    if(hadEconomics) DB.economics.partite[partitaId]=previousEconomics;
+    return;
+  }
+
   ROUTE={view:'partite',id:null};
   history.replaceState(null,'','#partite');
   render();
