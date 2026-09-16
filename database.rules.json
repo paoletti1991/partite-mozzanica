@@ -48,7 +48,7 @@
         ".read": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true && (auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1' || root.child('accessControl/users').child(auth.uid).child('permissions/partite/read').val() === true)",
         "$year": {
           ".write": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true && (auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1' || root.child('accessControl/users').child(auth.uid).child('permissions/partite/create').val() === true)",
-          ".validate": "newData.isNumber() && newData.val() === (data.exists() ? data.val() + 1 : 1)"
+          ".validate": "auth != null && auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1' || (newData.isNumber() && newData.val() === (data.exists() ? data.val() + 1 : 1))"
         }
       },
       "economics": {
