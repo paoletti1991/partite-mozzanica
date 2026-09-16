@@ -5,19 +5,7 @@ import tempfile
 
 path=Path('public/index.html')
 text=path.read_text(encoding='utf-8')
-old='''function deleteDocumento(documentoId){
-  const d=DB.documenti[documentoId];
-  if(!d){ toast('Documento non trovato','err'); return; }
-  if(!window.confirm('Stai per eliminare definitivamente questo documento di uscita. Le quantità delle partite coinvolte torneranno disponibili. L\\'operazione non è reversibile.')) return;
 
-  /* Giacenze, ricavi, utili e valorizzazioni sono calcolati dai documenti presenti:
-     rimuovendo il record vengono quindi ripristinati e ricalcolati automaticamente. */
-  delete DB.documenti[documentoId];
-  if(!save()){ DB.documenti[documentoId]=d; return; }
-  closeModal();
-  render();
-  toast('Documento eliminato e quantità ripristinate');
-}'''
 new='''function deleteDocumento(documentoId){
   const d=DB.documenti[documentoId];
   if(!d){ toast('Documento non trovato','err'); return; }
@@ -43,10 +31,12 @@ new='''function deleteDocumento(documentoId){
   render();
   toast('Documento eliminato e quantità ripristinate');
 }'''
-count=text.count(old)
+
+pattern=r"function deleteDocumento\(documentoId\)\{.*?\n\}\n\n/\* ---------- INIT ---------- \*/"
+text,count=re.subn(pattern,new+"\n\n/* ---------- INIT ---------- */",text,count=1,flags=re.S)
 if count!=1:
-    raise RuntimeError(f'deleteDocumento: attesa 1 occorrenza, trovate {count}')
-text=text.replace(old,new,1)
+    raise RuntimeError(f'deleteDocumento: sostituzione fallita, count={count}')
+
 path.write_text(text,encoding='utf-8')
 
 scripts=re.findall(r'<script(?P<attrs>[^>]*)>(?P<body>.*?)</script>',text,flags=re.S|re.I)
