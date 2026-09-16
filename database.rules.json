@@ -11,6 +11,7 @@
       }
     },
     "registroMozzanica": {
+      ".write": "auth != null && auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1'",
       "current": {
         ".read": "auth != null && auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1'",
         ".write": "auth != null && auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1'"
