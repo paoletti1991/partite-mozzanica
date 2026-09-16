@@ -52,6 +52,9 @@ firebase deploy --only database
 
 Per autorizzare altri utenti in futuro, configura il relativo profilo in `accessControl/users` e mantieni coerenti le regole del Realtime Database.
 
+### Fatture operatori
+
+Gli operatori possono registrare per le fatture d'acquisto e di vendita soltanto **numero e data**. Non vengono archiviati PDF e non viene utilizzato Firebase Storage. Importi, costi, ricavi, margini e report economici restano riservati ai profili autorizzati ai dati economici.
 
 ## 3. Pubblicare su GitHub Pages
 
