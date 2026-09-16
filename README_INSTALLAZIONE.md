@@ -55,6 +55,19 @@ firebase deploy --only database,storage
 
 Per autorizzare altri utenti in futuro, aggiungi il loro UID alle condizioni presenti in entrambi i file delle regole prima di ripubblicarle.
 
+### Fatture per gli operatori
+
+Gli operatori autorizzati possono caricare PDF di fatture d'acquisto e di vendita nei percorsi dedicati di Firebase Storage. I metadati documentali salvati nel Realtime Database contengono solo numero, data e collegamento al PDF: importi, costi, ricavi, margini e report economici restano esclusi dai profili operatore.
+
+I percorsi Storage dedicati sono:
+
+```text
+registro-mozzanica/fatture-acquisto/
+registro-mozzanica/fatture-vendita/
+```
+
+Le regole Storage limitano questi percorsi agli account operatore autorizzati e all'amministratore, accettando solo PDF fino a 15 MB. Tutto il resto di `registro-mozzanica/` rimane riservato all'amministratore.
+
 ## 3. Pubblicare su GitHub Pages
 
 1. Crea un repository GitHub.
