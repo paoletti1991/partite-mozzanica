@@ -1,0 +1,38 @@
+name: Integra fatture operatori
+
+on:
+  push:
+    paths:
+      - '.github/workflows/add-operator-invoices.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Applica modifica
+        run: python .github/scripts/add-operator-invoices.py
+      - name: Verifica sintassi JavaScript embedded
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re, subprocess
+          s=Path('public/index.html').read_text(encoding='utf-8')
+          scripts=re.findall(r'<script[^>]*>(.*?)</script>',s,re.S)
+          if not scripts:
+            raise SystemExit('Nessuno script trovato')
+          js=max(scripts,key=len)
+          Path('/tmp/app.js').write_text(js,encoding='utf-8')
+          subprocess.run(['node','--check','/tmp/app.js'],check=True)
+          PY
+      - name: Rimuove file temporanei e pubblica
+        run: |
+          rm -f .github/scripts/add-operator-invoices.py .github/workflows/add-operator-invoices.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/index.html .github/scripts/add-operator-invoices.py .github/workflows/add-operator-invoices.yml
+          git commit -m 'Abilita caricamento fatture agli operatori'
+          git push
