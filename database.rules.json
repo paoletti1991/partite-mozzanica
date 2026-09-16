@@ -55,7 +55,8 @@
         "$kind": {
           "$id": {
             ".write": "auth != null && root.child('accessControl/users').child(auth.uid).child('active').val() === true && (auth.uid === '4Kv4dvuYk5RQ7pMVdlCGo0k4uWj1' || (!data.exists() && newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/economics/create').val() === true) || (data.exists() && newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/economics/update').val() === true) || (data.exists() && !newData.exists() && root.child('accessControl/users').child(auth.uid).child('permissions/economics/delete').val() === true))"
-          }
+          },
+          ".validate": "$kind === 'partite' || $kind === 'documenti'"
         }
       },
       "audit": {

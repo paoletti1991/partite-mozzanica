@@ -773,6 +773,8 @@ async function flushGranularSave(){
     CLOUD.saveInFlight=false;CLOUD.syncing=false;updateStoreStatus();
     if(CLOUD.savePending||JSON.stringify(DB)!==JSON.stringify(CLOUD.syncedDB)){
       CLOUD.savePending=false;queueGranularSave();
+    }else{
+      refreshBranchCloud().catch(()=>{});
     }
   }
 }
@@ -799,7 +801,14 @@ async function syncInitialCloud(){
   finally{CLOUD.syncing=false;updateStoreStatus();}
 }
 function branchSections(){
-  const out=['partite','documenti','produttori','trasportatori','counters'];
+  const out=[];
+  if(hasPermission('partite','read')){
+    out.push('partite');
+    out.push('counters');
+  }
+  if(hasPermission('uscite','read'))out.push('documenti');
+  if(hasPermission('produttori','read'))out.push('produttori');
+  if(hasPermission('trasportatori','read'))out.push('trasportatori');
   if(hasPermission('economics','read'))out.push('economics');
   return out;
 }
@@ -820,6 +829,25 @@ function applyBranch(section,value,doRender=true){
   }
   persistLocal(DB,false);
   if(doRender)render();
+}
+async function refreshBranchCloud(){
+  if(CLOUD.mode!=='branches'||!CLOUD.user||CLOUD.saveInFlight)return false;
+  if(JSON.stringify(DB)!==JSON.stringify(CLOUD.syncedDB))return false;
+  const sections=branchSections();
+  const values=await Promise.all(sections.map(s=>window.firebaseBridge.readBranch(s)));
+  const fresh=emptyDB();
+  sections.forEach((section,i)=>{
+    if(section==='economics'){
+      fresh.economics=values[i]||{partite:{},documenti:{}};
+      fresh.economics.partite=fresh.economics.partite||{};
+      fresh.economics.documenti=fresh.economics.documenti||{};
+    }else fresh[section]=values[i]||{};
+  });
+  DB=normalizeDB(fresh);
+  CLOUD.syncedDB=cloneData(DB);
+  persistLocal(DB,false);
+  render();
+  return true;
 }
 async function syncBranchCloud(){
   CLOUD.mode='branches';CLOUD.syncing=true;CLOUD.error='';updateStoreStatus();
@@ -1284,18 +1312,20 @@ function annoStats(year){
 /* ==================================================================
    RENDER
    ================================================================== */
+function firstAllowedView(){
+  return ['dash','partite','uscite','rimanenze','dafornitore','report','produttori','trasportatori']
+    .find(canViewSection)||null;
+}
 function render(){
   const years=availableYears();
   if(!years.includes(YEAR)) YEAR=new Date().getFullYear();
 
   if(CLOUD.user && CLOUD.profile && !canViewSection(ROUTE.view)){
-    ROUTE={view:'dash',id:null};
-
-    if(location.hash!=='#dash'){
-      history.replaceState(null,'','#dash');
+    const fallback=firstAllowedView();
+    if(fallback){
+      ROUTE={view:fallback,id:null};
+      if(location.hash!=='#'+fallback)history.replaceState(null,'','#'+fallback);
     }
-
-    toast('Non hai i permessi per accedere a questa sezione','err');
   }
 
   renderNav(); renderYears();
@@ -2280,9 +2310,13 @@ async function savePartita(anno){
   DB.partite[id]={ id, num, anno, cer, kgIngresso:kgv, produttoreId:prod,
     dataIngresso,
     formulariIngresso: form?[{numero:form,data:document.getElementById('p_formdata').value}]:[],
-    fattureAcquisto:[], definizioniFornitore:[], lavorazioni:[], trasportoIngresso:null,
+    lavorazioni:[],
     createdAt:Date.now() };
-  save(); closeModal(); go('partita',id); toast('Partita '+num+'-Raee registrata');
+  if(!save()){
+    delete DB.partite[id];
+    return;
+  }
+  closeModal(); go('partita',id); toast('Partita '+num+'-Raee registrata');
 }
 
 /* ---- MODIFICA PARTITA PRIMA DI LAVORAZIONI/USCITE ---- */
@@ -2347,7 +2381,7 @@ function saveEditPartita(partitaId){
 
 /* ---- FATTURA ACQUISTO ---- */
 function openFattura(pid){
-  if(!requirePermission('economics','read')||!isAdmin())return;
+  if(!requirePermission('economics','create'))return;
   modal(`<div class="modal"><div class="modal-h"><h3>Fattura d'acquisto</h3><button class="x" onclick="closeModal()">×</button></div>
   <div class="modal-b">
     <div class="row2">
@@ -2361,7 +2395,7 @@ function openFattura(pid){
   <div class="modal-f"><button class="btn ghost" onclick="closeModal()">Annulla</button><button class="btn primary" onclick="saveFattura('${pid}')">Aggiungi fattura</button></div></div>`);
 }
 async function saveFattura(pid){
-  if(!requirePermission('economics','read')||!isAdmin())return;
+  if(!requirePermission('economics','create'))return;
   const p=DB.partite[pid];
   if(!p) return;
 
@@ -2445,7 +2479,7 @@ async function saveFattura(pid){
   );
 }
 function delFattura(pid,fid){
-  if(!requirePermission('economics','read')||!isAdmin())return;
+  if(!requirePermission('economics','delete'))return;
   const p=DB.partite[pid];
   if(!p) return;
 
@@ -2708,7 +2742,7 @@ function saveDocumento(){
     createdAt:Date.now()
   };
 
-  const createEconomics=hasPermission('economics','read');
+  const createEconomics=canMutateSection('economics','create');
 
   if(createEconomics){
     DB.economics=DB.economics||{};
@@ -2780,7 +2814,7 @@ function updateValorizzazioneNatura(){
   if(hint) hint.textContent=(costo?'L’importo sarà registrato con segno negativo e ridurrà il risultato economico.':'L’importo sarà registrato con segno positivo.')+' Puoi salvare anche il solo numero di fattura; la quota resterà da definire finché non inserirai l’importo.';
 }
 function saveValor(id){
-  if(!requirePermission('economics','read')||!isAdmin())return;
+  if(!requirePermission('economics','update'))return;
   const d=DB.documenti[id];
 
   if(!d){
