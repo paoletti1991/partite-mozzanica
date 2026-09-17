@@ -23,8 +23,8 @@ jobs:
     steps:
       - name: Preleva i file
         uses: actions/checkout@v6
-      - name: Verifica catalogo EER ufficiale
-        run: python .github/scripts/probe-low2015.py
+      - name: Aggiorna elenco EER ufficiale
+        run: python .github/scripts/update-eer-catalog.py
       - name: Prepara fatture operatori
         run: python .github/scripts/operator-invoice-amounts.py
       - name: Aggiunge formulario ingresso elenco partite
