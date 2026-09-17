@@ -25,6 +25,8 @@ jobs:
         uses: actions/checkout@v6
       - name: Prepara fatture operatori
         run: python .github/scripts/operator-invoice-amounts.py
+      - name: Aggiunge formulario ingresso elenco partite
+        run: python .github/scripts/add-entry-form-to-party-list.py
       - name: Configura GitHub Pages
         uses: actions/configure-pages@v5
       - name: Prepara il sito
