@@ -31,6 +31,8 @@ jobs:
         run: python .github/scripts/add-entry-form-to-party-list.py
       - name: Aggiunge filtri ricerca nei menu
         run: python .github/scripts/add-list-search-filters.py
+      - name: Protegge numerazione partite
+        run: python .github/scripts/protect-party-numbering.py
       - name: Configura GitHub Pages
         uses: actions/configure-pages@v5
       - name: Prepara il sito
