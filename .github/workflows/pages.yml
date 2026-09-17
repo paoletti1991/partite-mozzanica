@@ -27,6 +27,8 @@ jobs:
         run: python .github/scripts/operator-invoice-amounts.py
       - name: Aggiunge formulario ingresso elenco partite
         run: python .github/scripts/add-entry-form-to-party-list.py
+      - name: Aggiunge filtri ricerca nei menu
+        run: python .github/scripts/add-list-search-filters.py
       - name: Configura GitHub Pages
         uses: actions/configure-pages@v5
       - name: Prepara il sito
