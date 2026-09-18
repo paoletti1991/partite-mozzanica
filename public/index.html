@@ -246,6 +246,7 @@ tbody tr.clk:hover{background:var(--brass-wash)}
   border-radius:var(--r);box-shadow:var(--sh-lg);max-height:280px;overflow-y:auto;z-index:5;display:none
 }
 .combo.open .list{display:block}
+.modal.lav-modal .combo .list{position:static;top:auto;max-height:220px;margin-top:4px}
 .combo .opt{padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--line-2);display:flex;gap:10px;align-items:baseline}
 .combo .opt:hover,.combo .opt.hi{background:var(--brass-wash)}
 .combo .opt .c{font-family:'IBM Plex Mono';font-weight:600;font-size:13px;white-space:nowrap}
@@ -366,136 +367,19 @@ if(enabled){
     const appMod=await import('https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js');
     const authMod=await import('https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js');
     const dbMod=await import('https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js');
+    const storageMod=await import('https://www.gstatic.com/firebasejs/12.16.0/firebase-storage.js');
     const app=appMod.initializeApp(cfg);
-    const auth=authMod.getAuth(app), database=dbMod.getDatabase(app);
+    const auth=authMod.getAuth(app), database=dbMod.getDatabase(app), storage=storageMod.getStorage(app);
     const dataRef=dbMod.ref(database,'registroMozzanica/current');
-    const registroRef=dbMod.ref(database,'registroMozzanica');
-
-const branchRefs={
-  partite:dbMod.ref(database,'registroMozzanica/partite'),
-  documenti:dbMod.ref(database,'registroMozzanica/documenti'),
-  produttori:dbMod.ref(database,'registroMozzanica/produttori'),
-  trasportatori:dbMod.ref(database,'registroMozzanica/trasportatori'),
-  counters:dbMod.ref(database,'registroMozzanica/counters'),
-  economics:dbMod.ref(database,'registroMozzanica/economics'),
-  audit:dbMod.ref(database,'registroMozzanica/audit'),
-  meta:dbMod.ref(database,'registroMozzanica/meta')
-};
     window.firebaseBridge={
       configured:true,
       onAuth(callback){return authMod.onAuthStateChanged(auth,callback);},
       signIn(email,password){return authMod.signInWithEmailAndPassword(auth,email,password);},
       signOut(){return authMod.signOut(auth);},
-      async readUserProfile(uid){
-        const snap=await dbMod.get(dbMod.ref(database,'accessControl/users/'+uid));
-        return snap.exists()?snap.val():null;
-      },
-      async readMeta(){
-        const snap=await dbMod.get(dbMod.ref(database,'registroMozzanica/meta'));
-        return snap.exists()?snap.val():null;
-      },
-      async readBranch(section){
-        const ref=branchRefs[section];
-        if(!ref) throw new Error('Sezione Firebase non valida: '+section);
-        const snap=await dbMod.get(ref);
-        return snap.exists()?snap.val():null;
-      },
-      listenBranch(section,callback){
-        const ref=branchRefs[section];
-        if(!ref) throw new Error('Sezione Firebase non valida: '+section);
-        return dbMod.onValue(ref,snap=>callback(snap.exists()?snap.val():null));
-      },
-      async writeBranchUpdates(updates,auditEntries=[]){
-        const payload={...(updates||{})};
-        (auditEntries||[]).forEach(entry=>{
-          const key=dbMod.push(branchRefs.audit).key;
-          payload['audit/'+key]={
-            ...entry,
-            uid:auth.currentUser?.uid||'',
-            at:dbMod.serverTimestamp()
-          };
-        });
-        if(Object.keys(payload).length) await dbMod.update(registroRef,payload);
-      },
-      async nextCounter(year){
-        const ref=dbMod.ref(database,'registroMozzanica/counters/'+String(year));
-        const result=await dbMod.runTransaction(ref,current=>(Number(current)||0)+1);
-        if(!result.committed) throw new Error('Progressivo non assegnato');
-        return +result.snapshot.val();
-      },
-      async migrateLegacyToBranches(){
-        const legacySnap=await dbMod.get(dataRef);
-        if(!legacySnap.exists()) throw new Error('Archivio precedente non trovato');
-
-        const wrapper=legacySnap.val();
-        const legacy=wrapper?.data;
-        if(!legacy) throw new Error('Dati precedenti non trovati');
-
-        const destinationSections=['partite','documenti','produttori','trasportatori','counters','economics'];
-        const existing=await Promise.all(destinationSections.map(section=>dbMod.get(branchRefs[section])));
-        if(existing.some(snap=>snap.exists())){
-          throw new Error('Migrazione interrotta: una o più nuove sezioni contengono già dati');
-        }
-
-        const partiteOperative={};
-        const documentiOperativi={};
-        const economics={partite:{},documenti:{}};
-        const counters=JSON.parse(JSON.stringify(legacy.counters||{}));
-
-        Object.entries(legacy.partite||{}).forEach(([id,source])=>{
-          const p=JSON.parse(JSON.stringify(source));
-          const stored=legacy.economics?.partite?.[id]||{};
-          economics.partite[id]={
-            fattureAcquisto:stored.fattureAcquisto ?? p.fattureAcquisto ?? [],
-            definizioniFornitore:stored.definizioniFornitore ?? p.definizioniFornitore ?? [],
-            trasportoIngresso:stored.trasportoIngresso ?? p.trasportoIngresso ?? null
-          };
-          delete p.fattureAcquisto;
-          delete p.definizioniFornitore;
-          delete p.trasportoIngresso;
-          partiteOperative[id]=p;
-          const year=String(p.anno||'');
-          if(year) counters[year]=Math.max(+counters[year]||0,+p.num||0);
-        });
-
-        Object.entries(legacy.documenti||{}).forEach(([id,source])=>{
-          const d=JSON.parse(JSON.stringify(source));
-          const stored=legacy.economics?.documenti?.[id]||{};
-          economics.documenti[id]={
-            trasportoCosto:stored.trasportoCosto ?? d.trasportoCosto ?? 0,
-            valorizzazione:stored.valorizzazione ?? d.valorizzazione ?? null,
-            naturaEconomicaBozza:stored.naturaEconomicaBozza ?? d.naturaEconomicaBozza ?? null,
-            fatturaCliente:stored.fatturaCliente ?? d.fatturaCliente ?? null,
-            fatturaCosto:stored.fatturaCosto ?? d.fatturaCosto ?? null
-          };
-          delete d.trasportoCosto;
-          delete d.valorizzazione;
-          delete d.naturaEconomicaBozza;
-          delete d.fatturaCliente;
-          delete d.fatturaCosto;
-          documentiOperativi[id]=d;
-        });
-
-        await dbMod.update(registroRef,{
-          partite:partiteOperative,
-          documenti:documentiOperativi,
-          produttori:legacy.produttori||{},
-          trasportatori:legacy.trasportatori||{},
-          counters,
-          economics,
-          meta:{schemaVersion:3,migratedAt:dbMod.serverTimestamp()}
-        });
-
-        return {
-          partite:Object.keys(partiteOperative).length,
-          documenti:Object.keys(documentiOperativi).length,
-          produttori:Object.keys(legacy.produttori||{}).length,
-          trasportatori:Object.keys(legacy.trasportatori||{}).length
-        };
-      },
       async read(){const snap=await dbMod.get(dataRef);return snap.exists()?snap.val():null;},
       write(data){return dbMod.set(dataRef,{data,updatedAt:dbMod.serverTimestamp(),updatedBy:auth.currentUser?.uid||''});},
       listen(callback){return dbMod.onValue(dataRef,snap=>callback(snap.exists()?snap.val():null));},
+      async uploadFile(file,path){const target=storageMod.ref(storage,path);await storageMod.uploadBytes(target,file);return storageMod.getDownloadURL(target);},
       currentUser(){return auth.currentUser;}
     };
     window.dispatchEvent(new CustomEvent('firebase-bridge-ready',{detail:{ok:true}}));
@@ -517,264 +401,43 @@ const branchRefs={
 const FB_ON = !!(firebaseConfig&&firebaseConfig.apiKey&&firebaseConfig.projectId&&firebaseConfig.databaseURL);
 const LS_KEY='valmet_raee_v1', LS_PREV_KEY='valmet_raee_previous_v1';
 let DB=emptyDB();
-let CLOUD={configured:FB_ON,user:null,profile:null,ready:false,syncing:false,lastSync:0,error:'',unsubscribe:null,branchUnsubscribers:[],mode:'local',syncedDB:null,saveInFlight:false,savePending:false};
+let CLOUD={configured:FB_ON,user:null,ready:false,syncing:false,lastSync:0,error:'',unsubscribe:null};
 let cloudSaveTimer=null;
 
-function emptyDB(){
-  return {
-    partite:{},
-    produttori:{},
-    trasportatori:{},
-    documenti:{},
-    counters:{},
-    economics:{
-      partite:{},
-      documenti:{}
-    },
-    _meta:{
-      schemaVersion:3,
-      updatedAt:Date.now()
-    }
-  };
-}
+function emptyDB(){return {partite:{},produttori:{},trasportatori:{},documenti:{},counters:{},_meta:{schemaVersion:2,updatedAt:Date.now()}};}
 function normalizeDB(data){
   const d=(data&&typeof data==='object')?data:emptyDB();
-
-  ['partite','produttori','trasportatori','documenti','counters']
-    .forEach(k=>d[k]=d[k]||{});
-
-  d.economics=d.economics||{};
-  d.economics.partite=d.economics.partite||{};
-  d.economics.documenti=d.economics.documenti||{};
-
-  d._meta=d._meta||{};
-  d._meta.schemaVersion=3;
-  d._meta.updatedAt=+d._meta.updatedAt||Date.now();
-
+  ['partite','produttori','trasportatori','documenti','counters'].forEach(k=>d[k]=d[k]||{});
+  d._meta=d._meta||{}; d._meta.schemaVersion=2; d._meta.updatedAt=+d._meta.updatedAt||Date.now();
   return d;
 }
-  function partitaEconomicsData(p){
-  if(!p){
-    return {
-      fattureAcquisto:[],
-      definizioniFornitore:[],
-      trasportoIngresso:null
-    };
-  }
-
-  if(FB_ON && CLOUD.user && !hasPermission('economics','read')){
-    return {fattureAcquisto:[],definizioniFornitore:[],trasportoIngresso:null};
-  }
-
-  const stored=DB.economics?.partite?.[p.id];
-
-  if(stored){
-    return {
-      fattureAcquisto:stored.fattureAcquisto||[],
-      definizioniFornitore:stored.definizioniFornitore||[],
-      trasportoIngresso:stored.trasportoIngresso||null
-    };
-  }
-
-  // Compatibilità temporanea con il vecchio archivio
-  return {
-    fattureAcquisto:p.fattureAcquisto||[],
-    definizioniFornitore:p.definizioniFornitore||[],
-    trasportoIngresso:p.trasportoIngresso||null
-  };
-}
-
-function documentoEconomicsData(d){
-  if(!d){
-    return {
-      trasportoCosto:0,
-      valorizzazione:null,
-      naturaEconomicaBozza:null,
-      fatturaCliente:null,
-      fatturaCosto:null
-    };
-  }
-
-  if(FB_ON && CLOUD.user && !hasPermission('economics','read')){
-    return {trasportoCosto:0,valorizzazione:null,naturaEconomicaBozza:null,fatturaCliente:null,fatturaCosto:null};
-  }
-
-  const stored=DB.economics?.documenti?.[d.id];
-
-  if(stored){
-    return {
-      trasportoCosto:+stored.trasportoCosto||0,
-      valorizzazione:stored.valorizzazione||null,
-      naturaEconomicaBozza:stored.naturaEconomicaBozza||null,
-      fatturaCliente:stored.fatturaCliente||null,
-      fatturaCosto:stored.fatturaCosto||null
-    };
-  }
-
-  // Compatibilità temporanea con il vecchio archivio
-  return {
-    trasportoCosto:+d.trasportoCosto||0,
-    valorizzazione:d.valorizzazione||null,
-    naturaEconomicaBozza:d.naturaEconomicaBozza||null,
-    fatturaCliente:d.fatturaCliente||null,
-    fatturaCosto:d.fatturaCosto||null
-  };
-}
-
-function ensurePartitaEconomics(p){
-  if(!p) return null;
-
-  DB.economics=DB.economics||{};
-  DB.economics.partite=DB.economics.partite||{};
-
-  if(!DB.economics.partite[p.id]){
-    const current=partitaEconomicsData(p);
-
-    DB.economics.partite[p.id]={
-      fattureAcquisto:JSON.parse(
-        JSON.stringify(current.fattureAcquisto||[])
-      ),
-      definizioniFornitore:JSON.parse(
-        JSON.stringify(current.definizioniFornitore||[])
-      ),
-      trasportoIngresso:current.trasportoIngresso
-        ? JSON.parse(JSON.stringify(current.trasportoIngresso))
-        : null
-    };
-  }
-
-  return DB.economics.partite[p.id];
-}
-
-function ensureDocumentoEconomics(d){
-  if(!d) return null;
-
-  DB.economics=DB.economics||{};
-  DB.economics.documenti=DB.economics.documenti||{};
-
-  if(!DB.economics.documenti[d.id]){
-    const current=documentoEconomicsData(d);
-
-    DB.economics.documenti[d.id]={
-      trasportoCosto:+current.trasportoCosto||0,
-      valorizzazione:current.valorizzazione
-        ? JSON.parse(JSON.stringify(current.valorizzazione))
-        : null,
-      naturaEconomicaBozza:current.naturaEconomicaBozza||null,
-      fatturaCliente:current.fatturaCliente
-        ? JSON.parse(JSON.stringify(current.fatturaCliente))
-        : null,
-      fatturaCosto:current.fatturaCosto
-        ? JSON.parse(JSON.stringify(current.fatturaCosto))
-        : null
-    };
-  }
-
-  return DB.economics.documenti[d.id];
-}
 function hasBusinessData(data){return !!(data&&(Object.keys(data.partite||{}).length||Object.keys(data.documenti||{}).length||Object.keys(data.produttori||{}).length||Object.keys(data.trasportatori||{}).length));}
-function cloneData(value){return JSON.parse(JSON.stringify(value));}
-function localKey(base){return (FB_ON&&CLOUD.user?.uid)?base+'_'+CLOUD.user.uid:base;}
-function load(useLegacyFallback=false){
-  try{
-    const key=localKey(LS_KEY);
-    let raw=localStorage.getItem(key);
-    if(!raw&&useLegacyFallback&&key!==LS_KEY) raw=localStorage.getItem(LS_KEY);
-    DB=raw?normalizeDB(JSON.parse(raw)):emptyDB();
-  }catch(e){DB=emptyDB();}
+function load(){
+  try{const raw=localStorage.getItem(LS_KEY);if(raw)DB=normalizeDB(JSON.parse(raw));else DB=emptyDB();}catch(e){DB=emptyDB();}
 }
 function persistLocal(data,keepPrevious){
   try{
-    const key=localKey(LS_KEY), prevKey=localKey(LS_PREV_KEY);
-    const next=JSON.stringify(data), current=localStorage.getItem(key);
-    if(keepPrevious&&current&&current!==next)localStorage.setItem(prevKey,current);
-    localStorage.setItem(key,next);return true;
+    const next=JSON.stringify(data), current=localStorage.getItem(LS_KEY);
+    if(keepPrevious&&current&&current!==next)localStorage.setItem(LS_PREV_KEY,current);
+    localStorage.setItem(LS_KEY,next);return true;
   }catch(e){toast('Copia locale non riuscita: spazio browser insufficiente','err');return false;}
-}
-function permissionSection(section){return section==='documenti'?'uscite':section;}
-function canMutateSection(section,action){return isAdmin()||hasPermission(permissionSection(section),action);}
-function changedRecords(base,next){
-  const ids=new Set([...Object.keys(base||{}),...Object.keys(next||{})]);
-  const out=[];
-  ids.forEach(id=>{
-    const before=base?.[id], after=next?.[id];
-    if(JSON.stringify(before)===JSON.stringify(after)) return;
-    const action=before===undefined?'create':after===undefined?'delete':'update';
-    out.push({id,before,after,action});
-  });
-  return out;
-}
-function granularChanges(base,next){
-  const sections=['partite','documenti','produttori','trasportatori','economics'];
-  const updates={},audits=[],denied=[];
-  sections.forEach(section=>{
-    if(section==='economics'){
-      ['partite','documenti'].forEach(kind=>{
-        changedRecords(base?.economics?.[kind]||{},next?.economics?.[kind]||{}).forEach(ch=>{
-          if(!canMutateSection('economics',ch.action)){denied.push('economics.'+kind+':'+ch.action);return;}
-          updates['economics/'+kind+'/'+ch.id]=ch.after===undefined?null:cloneData(ch.after);
-          audits.push({section:'economics/'+kind,recordId:ch.id,action:ch.action});
-        });
-      });
-      return;
-    }
-    changedRecords(base?.[section]||{},next?.[section]||{}).forEach(ch=>{
-      if(!canMutateSection(section,ch.action)){denied.push(section+':'+ch.action);return;}
-      updates[section+'/'+ch.id]=ch.after===undefined?null:cloneData(ch.after);
-      audits.push({section,recordId:ch.id,action:ch.action});
-    });
-  });
-  return {updates,audits,denied};
 }
 function save(){
   DB=normalizeDB(DB);DB._meta.updatedAt=Date.now();DB._meta.device='browser';
-  if(CLOUD.user&&CLOUD.mode==='branches'){
-    const check=granularChanges(CLOUD.syncedDB||emptyDB(),DB);
-    if(check.denied.length){toast('Operazione non autorizzata per questo utente','err');return false;}
-  }
   if(!persistLocal(DB,true))return false;
-  if(CLOUD.user&&CLOUD.mode==='branches')queueGranularSave();
-  else queueCloudSave();
-  updateStoreStatus();return true;
+  queueCloudSave();updateStoreStatus();return true;
 }
 function queueCloudSave(){
-  if(!CLOUD.user||!window.firebaseBridge||!isAdmin()||CLOUD.mode!=='legacy')return;
+  if(!CLOUD.user||!window.firebaseBridge)return;
   clearTimeout(cloudSaveTimer);cloudSaveTimer=setTimeout(pushCloud,450);
 }
 async function pushCloud(){
-  if(!CLOUD.user||!window.firebaseBridge||!isAdmin()||CLOUD.mode!=='legacy')return;
+  if(!CLOUD.user||!window.firebaseBridge)return;
   CLOUD.syncing=true;CLOUD.error='';updateStoreStatus();
-  const payload=cloneData(DB);
+  const payload=JSON.parse(JSON.stringify(DB));
   try{await window.firebaseBridge.write(payload);CLOUD.lastSync=Date.now();}
   catch(e){CLOUD.error='Sincronizzazione non riuscita; dati conservati in locale';}
   finally{CLOUD.syncing=false;updateStoreStatus();}
-}
-function queueGranularSave(){
-  if(!CLOUD.user||!window.firebaseBridge||CLOUD.mode!=='branches')return;
-  clearTimeout(cloudSaveTimer);cloudSaveTimer=setTimeout(flushGranularSave,300);
-}
-async function flushGranularSave(){
-  if(CLOUD.mode!=='branches'||!CLOUD.user)return;
-  if(CLOUD.saveInFlight){CLOUD.savePending=true;return;}
-  const base=cloneData(CLOUD.syncedDB||emptyDB()), next=cloneData(DB);
-  const changes=granularChanges(base,next);
-  if(changes.denied.length){CLOUD.error='Modifica non autorizzata';updateStoreStatus();return;}
-  if(!Object.keys(changes.updates).length)return;
-  CLOUD.saveInFlight=true;CLOUD.syncing=true;CLOUD.error='';updateStoreStatus();
-  try{
-    await window.firebaseBridge.writeBranchUpdates(changes.updates,changes.audits);
-    CLOUD.syncedDB=cloneData(next);
-    CLOUD.lastSync=Date.now();
-  }catch(e){
-    CLOUD.error='Sincronizzazione non riuscita; modifiche conservate in locale';
-  }finally{
-    CLOUD.saveInFlight=false;CLOUD.syncing=false;updateStoreStatus();
-    if(CLOUD.savePending||JSON.stringify(DB)!==JSON.stringify(CLOUD.syncedDB)){
-      CLOUD.savePending=false;queueGranularSave();
-    }else{
-      refreshBranchCloud().catch(()=>{});
-    }
-  }
 }
 function applyCloudData(wrapper){
   if(!wrapper||!wrapper.data)return false;
@@ -782,13 +445,13 @@ function applyCloudData(wrapper){
   DB=incoming;persistLocal(DB,true);render();return true;
 }
 async function syncInitialCloud(){
-  if(!CLOUD.user||!window.firebaseBridge||!isAdmin())return;
-  CLOUD.mode='legacy';CLOUD.syncing=true;updateStoreStatus();
+  if(!CLOUD.user||!window.firebaseBridge)return;
+  CLOUD.syncing=true;updateStoreStatus();
   try{
     const remote=await window.firebaseBridge.read();
     const remoteTs=+(remote?.updatedAt||remote?.data?._meta?.updatedAt||0), localTs=+(DB._meta?.updatedAt||0);
     if(remote?.data&&(!hasBusinessData(DB)||remoteTs>localTs))applyCloudData(remote);
-    else if(hasBusinessData(DB)||!remote?.data)await window.firebaseBridge.write(cloneData(DB));
+    else if(hasBusinessData(DB)||!remote?.data)await window.firebaseBridge.write(JSON.parse(JSON.stringify(DB)));
     CLOUD.lastSync=Date.now();CLOUD.error='';
     if(CLOUD.unsubscribe)CLOUD.unsubscribe();
     CLOUD.unsubscribe=window.firebaseBridge.listen(next=>{
@@ -798,153 +461,21 @@ async function syncInitialCloud(){
   }catch(e){CLOUD.error='Accesso cloud non disponibile; copia locale attiva';}
   finally{CLOUD.syncing=false;updateStoreStatus();}
 }
-function branchSections(){
-  const out=[];
-  if(hasPermission('partite','read')){
-    out.push('partite');
-    out.push('counters');
-  }
-  if(hasPermission('uscite','read'))out.push('documenti');
-  if(hasPermission('produttori','read'))out.push('produttori');
-  if(hasPermission('trasportatori','read'))out.push('trasportatori');
-  if(hasPermission('economics','read'))out.push('economics');
-  return out;
-}
-function clearBranchListeners(){
-  (CLOUD.branchUnsubscribers||[]).forEach(fn=>{try{fn();}catch(e){}});
-  CLOUD.branchUnsubscribers=[];
-}
-function applyBranch(section,value,doRender=true){
-  if(section==='economics'){
-    DB.economics=value||{partite:{},documenti:{}};
-    DB.economics.partite=DB.economics.partite||{};
-    DB.economics.documenti=DB.economics.documenti||{};
-  }else DB[section]=value||{};
-  DB=normalizeDB(DB);
-  if(CLOUD.syncedDB){
-    if(section==='economics')CLOUD.syncedDB.economics=cloneData(DB.economics);
-    else CLOUD.syncedDB[section]=cloneData(DB[section]);
-  }
-  persistLocal(DB,false);
-  if(doRender)render();
-}
-async function refreshBranchCloud(){
-  if(CLOUD.mode!=='branches'||!CLOUD.user||CLOUD.saveInFlight)return false;
-  if(JSON.stringify(DB)!==JSON.stringify(CLOUD.syncedDB))return false;
-  const sections=branchSections();
-  const values=await Promise.all(sections.map(s=>window.firebaseBridge.readBranch(s)));
-  const fresh=emptyDB();
-  sections.forEach((section,i)=>{
-    if(section==='economics'){
-      fresh.economics=values[i]||{partite:{},documenti:{}};
-      fresh.economics.partite=fresh.economics.partite||{};
-      fresh.economics.documenti=fresh.economics.documenti||{};
-    }else fresh[section]=values[i]||{};
-  });
-  DB=normalizeDB(fresh);
-  CLOUD.syncedDB=cloneData(DB);
-  persistLocal(DB,false);
-  render();
-  return true;
-}
-async function syncBranchCloud(){
-  CLOUD.mode='branches';CLOUD.syncing=true;CLOUD.error='';updateStoreStatus();
-  clearBranchListeners();
-  try{
-    const sections=branchSections();
-    const values=await Promise.all(sections.map(s=>window.firebaseBridge.readBranch(s)));
-    DB=emptyDB();
-    sections.forEach((s,i)=>applyBranch(s,values[i],false));
-    CLOUD.syncedDB=cloneData(DB);
-    persistLocal(DB,false);
-    sections.forEach(section=>{
-      const unsub=window.firebaseBridge.listenBranch(section,value=>{
-        if(CLOUD.saveInFlight||cloudSaveTimer)return;
-        applyBranch(section,value,true);
-      });
-      CLOUD.branchUnsubscribers.push(unsub);
-    });
-    CLOUD.lastSync=Date.now();render();
-  }catch(e){
-    load(false);
-    CLOUD.syncedDB=cloneData(DB);
-    CLOUD.error='Dati cloud non disponibili; visualizzata la cache di questo utente';
-    render();
-  }finally{CLOUD.syncing=false;updateStoreStatus();}
-}
 function initCloudBridge(){
   if(CLOUD.ready)return;
   if(!window.firebaseBridge){updateStoreStatus();return;}
   CLOUD.ready=true;
-  window.firebaseBridge.onAuth(async user=>{
-    CLOUD.user=user||null;CLOUD.profile=null;CLOUD.error='';CLOUD.syncedDB=null;CLOUD.mode='local';
-    clearTimeout(cloudSaveTimer);cloudSaveTimer=null;
-    if(CLOUD.unsubscribe){CLOUD.unsubscribe();CLOUD.unsubscribe=null;}
-    clearBranchListeners();
-    if(!user){DB=emptyDB();updateStoreStatus();render();return;}
-    try{
-      const profile=await window.firebaseBridge.readUserProfile(user.uid);
-      if(!profile||profile.active!==true){DB=emptyDB();CLOUD.error='Utente non autorizzato';updateStoreStatus();render();return;}
-      CLOUD.profile=profile;
-      const meta=await window.firebaseBridge.readMeta();
-      if(+meta?.schemaVersion>=3){
-        await syncBranchCloud();
-      }else if(isAdmin()){
-        load(true);
-        await syncInitialCloud();
-      }else{
-        DB=emptyDB();CLOUD.mode='blocked';CLOUD.error='Archivio multiutente non ancora migrato dall’amministratore';render();
-      }
-      updateStoreStatus();
-    }catch(e){
-      DB=emptyDB();CLOUD.error='Profilo o archivio utente non disponibile';updateStoreStatus();render();
-    }
+  window.firebaseBridge.onAuth(user=>{
+    CLOUD.user=user||null;CLOUD.error='';updateStoreStatus();
+    if(user)syncInitialCloud();else if(CLOUD.unsubscribe){CLOUD.unsubscribe();CLOUD.unsubscribe=null;}
   });
 }
 window.addEventListener('firebase-bridge-ready',e=>{
   if(e.detail?.ok)initCloudBridge();else{CLOUD.ready=true;if(!e.detail?.localOnly)CLOUD.error='Firebase non raggiungibile';updateStoreStatus();}
 });
-window.addEventListener('online',()=>{
-  if(!CLOUD.user)return;
-  if(CLOUD.mode==='legacy'&&isAdmin())pushCloud();
-  if(CLOUD.mode==='branches')queueGranularSave();
-});
+window.addEventListener('online',()=>{if(CLOUD.user)pushCloud();});
 function uid(p){ return (p||'id')+'_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
-function isAdmin(){
-  return CLOUD.profile?.active===true && CLOUD.profile?.role==='admin';
-}
 
-function hasPermission(section,action='read'){
-  if(!FB_ON) return true;
-  if(isAdmin()) return true;
-  if(!CLOUD.profile || CLOUD.profile.active!==true) return false;
-  return CLOUD.profile.permissions?.[section]?.[action]===true;
-}
-function requirePermission(section,action){
-  if(hasPermission(section,action)) return true;
-  toast('Non hai i permessi per questa operazione','err');
-  return false;
-}
-  function canViewSection(view){
-  if(isAdmin()) return true;
-
-  const permissions={
-    dash: ['dashboard','read'],
-    partite: ['partite','read'],
-    partita: ['partite','read'],
-    uscite: ['uscite','read'],
-    rimanenze: ['rimanenze','read'],
-    dafornitore: ['economics','read'],
-    report: ['report','read'],
-    produttori: ['produttori','read'],
-    trasportatori: ['trasportatori','read']
-  };
-
-  const rule=permissions[view];
-  if(!rule) return false;
-
-  return hasPermission(rule[0],rule[1]);
-}
 /* progressivo N-Raee per anno */
 function nextNum(year){
   const list = Object.values(DB.partite).filter(p=>p.anno===year);
@@ -1002,32 +533,15 @@ function cerDesc(code){ const c=cerByCode[code]; return c? c.desc : ''; }
 
 /* €/kg d'ingresso della partita = Σ fatture acquisto / kg ingresso */
 function eurokgIngresso(p){
-  const eco=partitaEconomicsData(p);
-
-  const fatture=(eco.fattureAcquisto||[])
-    .reduce((s,f)=>s+(+f.importo||0),0);
-
-  if(fatture>0 && p.kgIngresso){
-    return fatture/p.kgIngresso;
-  }
-
-  const defs=eco.definizioniFornitore||[];
-  const tot=defs.reduce((s,d)=>s+(+d.importo||0),0);
-  const kgDef=defs.reduce((s,d)=>s+(+d.kg||0),0);
-
-  return defs.length&&kgDef>0 ? tot/kgDef : null;
+  const fatture=(p.fattureAcquisto||[]).reduce((s,f)=>s+(+f.importo||0),0);
+  if(fatture>0 && p.kgIngresso) return fatture/p.kgIngresso;
+  const defs=p.definizioniFornitore||[];
+  const tot=defs.reduce((s,d)=>s+(+d.importo||0),0), kgDef=defs.reduce((s,d)=>s+(+d.kg||0),0);
+  return defs.length&&kgDef>0?tot/kgDef:null;
 }
-
 function costoAcquisto(p){
-  const eco=partitaEconomicsData(p);
-
-  const fatture=(eco.fattureAcquisto||[])
-    .reduce((s,f)=>s+(+f.importo||0),0);
-
-  return fatture>0
-    ? fatture
-    : (eco.definizioniFornitore||[])
-        .reduce((s,d)=>s+(+d.importo||0),0);
+  const fatture=(p.fattureAcquisto||[]).reduce((s,f)=>s+(+f.importo||0),0);
+  return fatture>0?fatture:(p.definizioniFornitore||[]).reduce((s,d)=>s+(+d.importo||0),0);
 }
 
 /* lotti disponibili al netto di lavorazioni parziali e uscite */
@@ -1076,57 +590,21 @@ function canEditPartita(p){
   return !Object.values(DB.documenti).some(d=>(d.righe||[]).some(r=>r.partitaId===p.id));
 }
 function naturaValorizzazione(d){
-  if(!d) return 'ricavo';
-
-  const eco=documentoEconomicsData(d);
-
-  return (
-    (eco.valorizzazione && eco.valorizzazione.natura==='costo') ||
-    eco.naturaEconomicaBozza==='costo' ||
-    (!eco.valorizzazione && eco.fatturaCosto && !eco.fatturaCliente)
-  ) ? 'costo' : 'ricavo';
+  return d&&((d.valorizzazione&&d.valorizzazione.natura==='costo')||d.naturaEconomicaBozza==='costo'||(!d.valorizzazione&&d.fatturaCosto&&!d.fatturaCliente))?'costo':'ricavo';
 }
-
-function uscitaValorizzata(d){
-  if(!d) return false;
-
-  const eco=documentoEconomicsData(d);
-
-  return !!(
-    eco.valorizzazione &&
-    Number.isFinite(+eco.valorizzazione.valoreRiconosciuto) &&
-    +eco.valorizzazione.valoreRiconosciuto>0
-  );
-}
-
-function documentoEconomicoUscita(d){
-  if(!d) return null;
-
-  const eco=documentoEconomicsData(d);
-
-  return naturaValorizzazione(d)==='costo'
-    ? (eco.fatturaCosto||null)
-    : (eco.fatturaCliente||null);
-}
+function uscitaValorizzata(d){ return !!(d&&d.valorizzazione&&Number.isFinite(+d.valorizzazione.valoreRiconosciuto)&&+d.valorizzazione.valoreRiconosciuto>0); }
+function documentoEconomicoUscita(d){ return naturaValorizzazione(d)==='costo'?(d.fatturaCosto||null):(d.fatturaCliente||null); }
 function documentoIngressoLabel(p){
   const docs=(p.formulariIngresso||[]).map(f=>`${f.numero||'—'}${f.data?' · '+dfmt(f.data):''}`);
   return docs.join(', ')||'Nessun documento di entrata';
 }
 function documentiClienteFatturati(p){
   if(!p) return [];
-
-  return Object.values(DB.documenti).filter(d=>{
-    const eco=documentoEconomicsData(d);
-
-    return (
-      eco.valorizzazione &&
-      naturaValorizzazione(d)==='ricavo' &&
-      (+eco.valorizzazione.valoreRiconosciuto||0)>0 &&
-      eco.fatturaCliente &&
-      String(eco.fatturaCliente.numero||'').trim() &&
-      (d.righe||[]).some(r=>r.partitaId===p.id)
-    );
-  });
+  return Object.values(DB.documenti).filter(d=>
+    d.valorizzazione && naturaValorizzazione(d)==='ricavo' && (+d.valorizzazione.valoreRiconosciuto||0)>0 &&
+    d.fatturaCliente && String(d.fatturaCliente.numero||'').trim() &&
+    (d.righe||[]).some(r=>r.partitaId===p.id)
+  );
 }
 function quotaClienteKey(d,r,index){ return r.id||`${d.id}|${index}|${r.partitaId}|${r.lotto||'tq'}`; }
 function quoteClienteFatturate(p){
@@ -1138,161 +616,65 @@ function quoteClienteFatturate(p){
   return out;
 }
 function quoteDaDefinireConFornitore(p){
-  if(!p) return [];
-
-  const ecoPartita=partitaEconomicsData(p);
-
-  if(!(ecoPartita.fattureAcquisto||[])
-    .some(f=>Number.isFinite(+f.importo)&&+f.importo>0)){
-    return [];
-  }
-
+  if(!p || !(p.fattureAcquisto||[]).some(f=>Number.isFinite(+f.importo)&&+f.importo>0)) return [];
   const out=[];
-
   Object.values(DB.documenti).forEach(d=>{
     if(uscitaValorizzata(d)) return;
-
     (d.righe||[]).forEach((r,index)=>{
-      if(r.partitaId===p.id){
-        out.push({
-          key:quotaClienteKey(d,r,index),
-          d,
-          r,
-          kg:+r.kg||0
-        });
-      }
+      if(r.partitaId===p.id) out.push({key:quotaClienteKey(d,r,index),d,r,kg:+r.kg||0});
     });
   });
-
   return out;
 }
 function partitaDaDefinireConFornitore(p){
   return !!p && (+p.kgIngresso||0)>0 && quoteDaDefinireConFornitore(p).length>0;
 }
 function fattureClienteLabel(p){
-  return [
-    ...new Set(
-      documentiClienteFatturati(p)
-        .map(d=>documentoEconomicsData(d).fatturaCliente?.numero)
-        .filter(Boolean)
-    )
-  ].join(', ');
+  return [...new Set(documentiClienteFatturati(p).map(d=>d.fatturaCliente.numero))].join(', ');
 }
-
 function fattureAcquistoValorizzateLabel(p){
-  const eco=partitaEconomicsData(p);
-
-  return [
-    ...new Set(
-      (eco.fattureAcquisto||[])
-        .filter(f=>(+f.importo||0)>0)
-        .map(f=>f.numero)
-        .filter(Boolean)
-    )
-  ].join(', ') || 'fattura d’acquisto valorizzata';
+  return [...new Set((p.fattureAcquisto||[]).filter(f=>(+f.importo||0)>0).map(f=>f.numero).filter(Boolean))].join(', ')||'fattura d’acquisto valorizzata';
 }
 
 /* valorizzazione proporzionale di un documento:
    quota_i = V * (kg_i * €/kg_ingresso_i) / Σ(kg*€/kg). Fallback: kg-proporzionale */
 function ripartizioneDoc(d){
-  const eco=documentoEconomicsData(d);
-
-  const importo=eco.valorizzazione
-    ? Math.abs(+eco.valorizzazione.valoreRiconosciuto||0)
-    : 0;
-
-  const V=naturaValorizzazione(d)==='costo'
-    ? -importo
-    : importo;
-
-  const righe=(d.righe||[]).map(r=>{
-    const p=DB.partite[r.partitaId];
-    const ekgI=p ? eurokgIngresso(p) : null;
-
-    return {
-      r,
-      p,
-      kg:+r.kg||0,
-      ekgI,
-      base:(+r.kg||0)*(ekgI||0)
-    };
+  const importo = d.valorizzazione? Math.abs(+d.valorizzazione.valoreRiconosciuto||0) : 0;
+  const V = naturaValorizzazione(d)==='costo' ? -importo : importo;
+  const righe = (d.righe||[]).map(r=>{
+    const p = DB.partite[r.partitaId];
+    const ekgI = p? eurokgIngresso(p) : null;
+    return {r, p, kg:+r.kg||0, ekgI, base:(+r.kg||0)*(ekgI||0)};
   });
-
-  const totBase=righe.reduce((s,x)=>s+x.base,0);
-  const totKg=righe.reduce((s,x)=>s+x.kg,0);
-
-  const fallbackKg=
-    totBase===0 ||
-    righe.some(x=>x.ekgI==null);
-
+  const totBase = righe.reduce((s,x)=>s+x.base,0);
+  const totKg = righe.reduce((s,x)=>s+x.kg,0);
+  const fallbackKg = totBase===0 || righe.some(x=>x.ekgI==null); // finché manca un prezzo, ripartizione coerente a peso
   righe.forEach(x=>{
-    if(!V){
-      x.quota=0;
-      return;
-    }
-
-    if(fallbackKg){
-      x.quota=totKg ? V*x.kg/totKg : 0;
-    }else{
-      x.quota=totBase ? V*x.base/totBase : 0;
-    }
+    if(!V){ x.quota=0; return; }
+    if(fallbackKg){ x.quota = totKg? V*x.kg/totKg : 0; }
+    else { x.quota = totBase? V*x.base/totBase : 0; }
   });
-
-  return {
-    V,
-    righe,
-    totBase,
-    totKg,
-    fallbackKg
-  };
+  return {V, righe, totBase, totKg, fallbackKg};
 }
+
 /* aggregati per partita */
 function partitaEconomics(p){
-  let ricavo=0;
-  let trasportoUscita=0;
-
+  let ricavo=0, trasportoUscita=0;
   Object.values(DB.documenti).forEach(d=>{
-    const rip=ripartizioneDoc(d);
-    const ecoDoc=documentoEconomicsData(d);
-
-    const costoTrasp=d.trasportoInterno
-      ? 0
-      : (+ecoDoc.trasportoCosto||0);
-
-    const totKgDoc=rip.totKg;
-
+    const rip = ripartizioneDoc(d);
+    const costoTrasp = d.trasportoInterno? 0 : (+ (d.trasportoCosto)||0);
+    const totKgDoc = rip.totKg;
     rip.righe.forEach(x=>{
       if(x.r.partitaId===p.id){
-        ricavo+=x.quota;
-
-        if(totKgDoc>0){
-          trasportoUscita+=costoTrasp*(x.kg/totKgDoc);
-        }
+        ricavo += x.quota;
+        if(totKgDoc>0) trasportoUscita += costoTrasp * (x.kg/totKgDoc);
       }
     });
   });
-
-  const ecoPartita=partitaEconomicsData(p);
-
-  const acquisto=costoAcquisto(p);
-
-  const traspIng=ecoPartita.trasportoIngresso
-    ? (+ecoPartita.trasportoIngresso.importo||0)
-    : 0;
-
-  const utile=
-    ricavo -
-    acquisto -
-    traspIng -
-    trasportoUscita;
-
-  return {
-    ricavo,
-    acquisto,
-    traspIng,
-    trasportoUscita,
-    utile
-  };
+  const acquisto = costoAcquisto(p);
+  const traspIng = p.trasportoIngresso? (+p.trasportoIngresso.importo||0) : 0;
+  const utile = ricavo - acquisto - traspIng - trasportoUscita;
+  return {ricavo, acquisto, traspIng, trasportoUscita, utile};
 }
 
 /* aggregati annuali */
@@ -1310,22 +692,9 @@ function annoStats(year){
 /* ==================================================================
    RENDER
    ================================================================== */
-function firstAllowedView(){
-  return ['dash','partite','uscite','rimanenze','dafornitore','report','produttori','trasportatori']
-    .find(canViewSection)||null;
-}
 function render(){
   const years=availableYears();
   if(!years.includes(YEAR)) YEAR=new Date().getFullYear();
-
-  if(CLOUD.user && CLOUD.profile && !canViewSection(ROUTE.view)){
-    const fallback=firstAllowedView();
-    if(fallback){
-      ROUTE={view:fallback,id:null};
-      if(location.hash!=='#'+fallback)history.replaceState(null,'','#'+fallback);
-    }
-  }
-
   renderNav(); renderYears();
   const v = ROUTE.view;
   const titles = {dash:'Cruscotto',partite:'Partite',uscite:'Documenti di uscita',rimanenze:'Rimanenze magazzino',dafornitore:'Da definire col fornitore',report:'Report movimentazioni',produttori:'Produttori',trasportatori:'Trasportatori',partita:'Dettaglio partita'};
@@ -1346,20 +715,11 @@ function updateStoreStatus(){
   else{dot.className='st-dot';label.textContent='Archivio locale';}
 }
 function renderNav(){
-  const daForn = Object.values(DB.partite)
-    .filter(p=>p.anno===YEAR)
-    .reduce((s,p)=>s+quoteDaDefinireConFornitore(p).length,0);
-
+  const daForn = Object.values(DB.partite).filter(p=>p.anno===YEAR).reduce((s,p)=>s+quoteDaDefinireConFornitore(p).length,0);
   document.getElementById('nav').innerHTML = NAV.map(n=>{
     if(n.grp) return `<div class="grp">${n.grp}</div>`;
-
-    if(!canViewSection(n.k)) return '';
-
     const on = ROUTE.view===n.k || (n.k==='partite'&&ROUTE.view==='partita');
-    const badge = n.k==='dafornitore' && daForn>0
-      ? `<span class="badge">${daForn}</span>`
-      : '';
-
+    const badge = n.k==='dafornitore' && daForn>0 ? `<span class="badge">${daForn}</span>` : '';
     return `<a class="${on?'on':''} ${n.warn?'warnb':''}" href="#${n.k}">${svgIco(n.ico)}${n.t}${badge}</a>`;
   }).join('');
 }
@@ -1374,111 +734,8 @@ function renderYears(){
 }
 function setYear(y){ YEAR=y; render(); }
 
-
-function viewDashOperational(){
-  const ps=Object.values(DB.partite).filter(p=>p.anno===YEAR);
-  const docs=Object.values(DB.documenti).filter(d=>(d.righe||[]).some(r=>DB.partite[r.partitaId]?.anno===YEAR));
-  const kgIn=ps.reduce((s,p)=>s+(+p.kgIngresso||0),0);
-  const kgOut=ps.reduce((s,p)=>s+kgUsciti(p),0);
-  const stock=ps.reduce((s,p)=>s+giacenza(p),0);
-  const worked=ps.filter(p=>(p.lavorazioni||[]).length).length;
-  const hazardous=ps.filter(p=>giacenza(p)>0.01&&cerByCode[p.cer]?.hazard);
-  const recent=[...ps].sort((a,b)=>b.num-a.num).slice(0,8);
-  return `<div class="dash-hero"><div class="intro"><div class="eyebrow">Mozzanica · ${YEAR}</div><h2>Panoramica operativa</h2><div class="desc">Dati di magazzino e movimentazione · valori economici non disponibili per questo profilo</div><div class="dash-actions">${hasPermission('partite','create')?'<button class="btn primary sm" onclick="openPartita()">+ Nuova partita</button>':''}${hasPermission('uscite','create')?'<button class="btn ghost-light sm" onclick="openDocumento()">+ Documento uscita</button>':''}</div></div></div>
-  <div class="kpis dash-kpis">
-    <div class="kpi accent"><div class="lab">Partite in ingresso</div><div class="val">${ps.length}</div><div class="sub">${kg(kgIn)} complessivi</div></div>
-    <div class="kpi"><div class="lab">Materiale uscito</div><div class="val">${kg(kgOut)}</div><div class="sub">${docs.length} documenti di uscita</div></div>
-    <div class="kpi"><div class="lab">Giacenza attuale</div><div class="val">${kg(stock)}</div><div class="sub">materiale presente in impianto</div></div>
-    <div class="kpi"><div class="lab">Partite lavorate</div><div class="val">${worked}</div><div class="sub">con almeno una lavorazione</div></div>
-    <div class="kpi ${hazardous.length?'warn-card':''}"><div class="lab">Pericolosi in giacenza</div><div class="val">${hazardous.length}</div><div class="sub">${kg(hazardous.reduce((s,p)=>s+giacenza(p),0))}</div></div>
-  </div>
-  <div class="panel"><div class="panel-h"><h3>Partite recenti</h3><span class="sp"></span><button class="btn sm" onclick="go('partite')">Registro completo</button></div>
-  ${recent.length?`<table><thead><tr><th>Partita</th><th>Produttore</th><th>CER</th><th>Ingresso</th><th>Giacenza</th><th>Stato</th></tr></thead><tbody>${recent.map(p=>{const g=giacenza(p),out=kgUsciti(p);const stato=g<=.01?'<span class="tag green">chiusa</span>':out>0?'<span class="tag brass">parziale</span>':'<span class="tag grey">in giacenza</span>';return `<tr class="clk" onclick="go('partita','${p.id}')"><td><span class="pnum">${p.num}<span class="r">-Raee</span></span></td><td>${esc(prodName(p.produttoreId))}</td><td><span class="tag cer">${cerLabel(p.cer)}</span></td><td class="num">${kg(p.kgIngresso)}</td><td class="num">${kg(g)}</td><td>${stato}</td></tr>`;}).join('')}</tbody></table>`:emptyState('Nessuna partita per il '+YEAR,'')}
-  </div>`;
-}
-function viewPartiteOperational(){
-  const ps=Object.values(DB.partite).filter(p=>p.anno===YEAR).sort((a,b)=>a.num-b.num);
-  return `<div class="panel"><div class="panel-h"><h3>Registro partite ${YEAR}</h3><span class="cnt">${ps.length} partite</span><span class="sp"></span>${hasPermission('partite','create')?'<button class="btn primary sm" onclick="openPartita()">+ Nuova partita</button>':''}</div>
-  ${ps.length?`<table><thead><tr><th>Partita</th><th>Produttore</th><th>CER</th><th>Ingresso</th><th>Giacenza</th><th>Flusso</th></tr></thead><tbody>${ps.map(p=>{const g=giacenza(p),hasLav=(p.lavorazioni||[]).length>0,hasOut=kgUsciti(p)>0;return `<tr class="clk" onclick="go('partita','${p.id}')"><td><span class="pnum">${p.num}<span class="r">-Raee</span></span></td><td>${esc(prodName(p.produttoreId))}</td><td><span class="tag cer">${cerLabel(p.cer)}</span></td><td class="num">${kg(p.kgIngresso)}</td><td class="num">${kg(g)}</td><td><div class="flow"><span class="step done"><span class="b"></span>Ingresso</span><span class="arw">▸</span><span class="step ${hasLav?'done':''}"><span class="b"></span>Lavoraz.</span><span class="arw">▸</span><span class="step ${hasOut?'done':''}"><span class="b"></span>Uscita</span></div></td></tr>`;}).join('')}</tbody></table>`:emptyState('Nessuna partita per il '+YEAR,'')}
-  </div>`;
-}
-function viewPartitaDetailOperational(){
-  const p=DB.partite[ROUTE.id];if(!p)return emptyState('Partita non trovata','');
-  const prod=DB.produttori[p.produttoreId]||{},lotti=lottiDisponibili(p),g=giacenza(p),editable=canEditPartita(p);
-  const uscite=[];Object.values(DB.documenti).forEach(d=>(d.righe||[]).forEach(r=>{if(r.partitaId===p.id)uscite.push({d,r});}));
-  return `<button class="btn ghost sm" onclick="go('partite')" style="margin-bottom:14px">← Registro partite</button>
-  <div class="det-head"><div class="idbox"><div class="n">${p.num}<span class="r">-Raee</span></div><div class="y">${p.anno} · Mozzanica</div></div><div class="meta"><div class="prod">${esc(prod.ragioneSociale||'—')}</div><div class="row"><span>CER <b>${cerLabel(p.cer)}</b></span><span>Ingresso <b>${kg(p.kgIngresso)}</b></span><span>Data <b>${dfmt(p.dataIngresso)}</b></span><span>Giacenza <b>${kg(g)}</b></span></div></div></div>
-  <div class="det-grid"><div>
-    <div class="sec"><div class="sec-h"><h4>Fatture d'acquisto</h4><span class="sp"></span>${hasPermission('partite','update')?`<button class="btn sm" onclick="openOperationalInvoice('acquisto','${p.id}')">+ Registra fattura</button>`:''}</div><div class="sec-b pad0">${renderOperationalInvoices('acquisto',p.id)}</div></div>
-    <div class="sec"><div class="sec-h"><h4>Lavorazioni interne</h4><span class="sp"></span>${hasPermission('partite','update')?`<button class="btn sm" onclick="openLavorazione('${p.id}')">+ Lavorazione parziale</button>`:''}</div><div class="sec-b pad0">${(p.lavorazioni||[]).length?`<table><thead><tr><th>Tipo</th><th>Data</th><th>Kg lavorati</th><th>Risultato</th><th></th></tr></thead><tbody>${p.lavorazioni.map(l=>`<tr><td>${l.tipo==='trit'?'Triturazione':'Selezione e cernita'}</td><td>${dfmt(l.data)}</td><td class="num">${kg(l.kgLavorati||l.pesoPrima)}</td><td>${l.frazioni?.length?l.frazioni.map(fr=>`${esc(fr.label)} ${kg(fr.kg)}`).join('<br>'):kg(l.pesoDopo)}</td><td>${hasPermission('partite','update')?`<button class="btn ghost sm" onclick="delLavorazione('${p.id}','${l.id}')">✕</button>`:''}</td></tr>`).join('')}</tbody></table>`:emptyState('Nessuna lavorazione','')}</div></div>
-    <div class="sec"><div class="sec-h"><h4>Uscite verso impianti esterni</h4><span class="sp"></span>${hasPermission('uscite','create')?`<button class="btn sm" onclick="openDocumento(null,'${p.id}')">+ Documento di uscita</button>`:''}</div><div class="sec-b pad0">${uscite.length?`<table><thead><tr><th>Documento</th><th>Data</th><th>Destinatario</th><th>Kg</th><th>Tipo</th></tr></thead><tbody>${uscite.map(({d,r})=>`<tr class="clk" onclick="openDocView('${d.id}')"><td><span class="mono">${esc(d.numero||'')}</span></td><td>${dfmt(d.data)}</td><td>${esc(d.destinatario||'—')}</td><td class="num">${kg(r.kg)}</td><td>${r.saldo?'<span class="tag green">saldo</span>':'<span class="tag brass">parziale</span>'}</td></tr>`).join('')}</tbody></table>`:emptyState('Nessuna uscita','')}</div></div>
-  </div><div>
-    <div class="sec"><div class="sec-h"><h4>Disponibilità</h4></div><div class="sec-b"><div class="kv"><span class="k">Kg ingresso</span><span class="v">${kg(p.kgIngresso)}</span></div><div class="kv"><span class="k">Kg usciti</span><span class="v">${kg(kgUsciti(p))}</span></div><div class="kv"><span class="k">Giacenza</span><span class="v">${kg(g)}</span></div>${lotti.filter(l=>l.kg>.01).map(l=>`<div class="kv"><span class="k">${esc(l.label)}</span><span class="v">${kg(l.kg)}</span></div>`).join('')}</div></div>
-    <div class="sec"><div class="sec-h"><h4>Ingresso</h4><span class="sp"></span>${editable&&hasPermission('partite','update')?`<button class="btn sm" onclick="openEditPartita('${p.id}')">Modifica</button>`:''}${hasPermission('partite','delete')?`<button class="btn danger sm" onclick="deletePartita('${p.id}')">Elimina</button>`:''}</div><div class="sec-b"><div class="kv"><span class="k">Produttore</span><span class="v">${esc(prod.ragioneSociale||'—')}</span></div>${(p.formulariIngresso||[]).map(f=>`<div class="kv"><span class="k">Formulario</span><span class="v mono">${esc(f.numero||'—')} · ${dfmt(f.data)}</span></div>`).join('')}</div></div>
-  </div></div>`;
-}
-function viewUsciteOperational(){
-  const docs=Object.values(DB.documenti).filter(d=>(d.righe||[]).some(r=>DB.partite[r.partitaId]?.anno===YEAR)).sort((a,b)=>new Date(b.data||0)-new Date(a.data||0));
-  return `<div class="panel"><div class="panel-h"><h3>Documenti di uscita ${YEAR}</h3><span class="cnt">${docs.length} documenti</span><span class="sp"></span>${hasPermission('uscite','create')?'<button class="btn primary sm" onclick="openDocumento()">+ Nuovo documento</button>':''}</div>${docs.length?`<table><thead><tr><th>Documento</th><th>Data</th><th>Destinatario</th><th>Partite</th><th>Kg totali</th></tr></thead><tbody>${docs.map(d=>{const parts=[...new Set((d.righe||[]).map(r=>DB.partite[r.partitaId]).filter(Boolean).map(p=>p.num+'-Raee'))];const tot=(d.righe||[]).reduce((s,r)=>s+(+r.kg||0),0);return `<tr class="clk" onclick="openDocView('${d.id}')"><td><span class="tag ${d.tipo==='fir'?'grey':'brass'}">${d.tipo==='fir'?'FIR':'Annex VII'}</span> <span class="mono">${esc(d.numero||'')}</span></td><td>${dfmt(d.data)}</td><td>${esc(d.destinatario||'')}</td><td class="mono">${parts.join(', ')}</td><td class="num">${kg(tot)}</td></tr>`;}).join('')}</tbody></table>`:emptyState('Nessun documento di uscita','')}</div>`;
-}
-function viewRimanenzeOperational(){
-  const rows=[];Object.values(DB.partite).forEach(p=>{const g=giacenza(p);if(g>.01)rows.push({p,g});});rows.sort((a,b)=>b.g-a.g);const tot=rows.reduce((s,r)=>s+r.g,0);
-  return `<div class="kpis"><div class="kpi accent"><span class="edge">kg</span><div class="lab">Giacenza totale</div><div class="val">${kg(tot)}</div><div class="sub">${rows.length} partite con residuo</div></div></div><div class="panel"><div class="panel-h"><h3>Rifiuti giacenti in impianto</h3></div>${rows.length?`<table><thead><tr><th>Partita</th><th>Anno</th><th>Produttore</th><th>CER</th><th>Ingresso</th><th>Usciti</th><th>Giacenza</th></tr></thead><tbody>${rows.map(({p,g})=>`<tr class="clk" onclick="go('partita','${p.id}')"><td><span class="pnum">${p.num}<span class="r">-Raee</span></span></td><td>${p.anno}</td><td>${esc(prodName(p.produttoreId))}</td><td><span class="tag cer">${cerLabel(p.cer)}</span></td><td class="num">${kg(p.kgIngresso)}</td><td class="num">${kg(kgUsciti(p))}</td><td class="num">${kg(g)}</td></tr>`).join('')}</tbody></table>`:emptyState('Magazzino vuoto','')}</div>`;
-}
-function openDocViewOperational(id){
-  const d=DB.documenti[id];if(!d)return;
-  const rows=(d.righe||[]).map(r=>{const p=DB.partite[r.partitaId];return `<tr><td>${p?p.num+'-Raee':'?'}</td><td>${esc(r.lotto||'tal quale')}</td><td class="num">${kg(r.kg)}</td><td>${r.saldo?'<span class="tag green">saldo</span>':'<span class="tag brass">parziale</span>'}</td></tr>`;}).join('');
-  modal(`<div class="modal wide"><div class="modal-h"><h3>${d.tipo==='fir'?'FIR':'Annex VII'} · <span class="mono">${esc(d.numero||'')}</span></h3><button class="x" onclick="closeModal()">×</button></div><div class="modal-b"><div class="kv"><span class="k">Data</span><span class="v">${dfmt(d.data)}</span></div><div class="kv"><span class="k">Destinatario</span><span class="v">${esc(d.destinatario||'—')}</span></div>${d.trasportatoreId?`<div class="kv"><span class="k">Trasportatore</span><span class="v">${esc(DB.trasportatori[d.trasportatoreId]?.ragioneSociale||'—')}</span></div>`:''}<div class="sec" style="margin-top:16px"><div class="sec-h"><h4>Fatture di vendita</h4><span class="sp"></span>${hasPermission('uscite','update')?`<button class="btn sm" onclick="openOperationalInvoice('vendita','${d.id}')">+ Registra fattura</button>`:''}</div><div class="sec-b pad0">${renderOperationalInvoices('vendita',d.id)}</div></div><table style="margin-top:14px"><thead><tr><th>Partita</th><th>Lotto</th><th>Kg</th><th>Tipo</th></tr></thead><tbody>${rows}</tbody></table></div><div class="modal-f">${hasPermission('uscite','delete')?`<button class="btn danger" onclick="deleteDocumento('${id}')">Elimina documento</button>`:''}<span style="flex:1"></span><button class="btn" onclick="closeModal()">Chiudi</button></div></div>`);
-}
-
-function operationalInvoiceRecord(kind,id){
-  return kind==='acquisto' ? DB.partite[id] : DB.documenti[id];
-}
-function operationalInvoiceKey(kind){
-  return kind==='acquisto' ? 'fattureDocumentaliAcquisto' : 'fattureDocumentaliVendita';
-}
-function renderOperationalInvoices(kind,id){
-  const rec=operationalInvoiceRecord(kind,id);
-  const items=(rec&&rec[operationalInvoiceKey(kind)])||[];
-  if(!items.length) return `<div class="empty"><div class="big">Nessuna fattura registrata</div>Gli operatori possono registrare numero e data senza accedere a importi o altri dati economici.</div>`;
-  return `<table><thead><tr><th>N. fattura</th><th>Data</th></tr></thead><tbody>${items.map(f=>`<tr><td class="mono">${esc(f.numero||'—')}</td><td>${dfmt(f.data)}</td></tr>`).join('')}</tbody></table>`;
-}
-function openOperationalInvoice(kind,id){
-  const section=kind==='acquisto'?'partite':'uscite';
-  if(!requirePermission(section,'update'))return;
-  const rec=operationalInvoiceRecord(kind,id);if(!rec){toast('Elemento non trovato','err');return;}
-  modal(`<div class="modal"><div class="modal-h"><h3>${kind==='acquisto'?"Fattura d'acquisto":'Fattura di vendita'}</h3><button class="x" onclick="closeModal()">×</button></div><div class="modal-b"><div class="row2"><div class="field"><label>N. fattura <span class="req">*</span></label><input class="inp mono" id="ofi_num"></div><div class="field"><label>Data <span class="req">*</span></label><input class="inp" type="date" id="ofi_data"></div></div><div class="mini">Per questo profilo vengono registrati soltanto numero e data. Importi e dati economici restano riservati all'amministratore.</div></div><div class="modal-f"><button class="btn" onclick="closeModal()">Annulla</button><span style="flex:1"></span><button class="btn primary" onclick="saveOperationalInvoice('${kind}','${id}')">Registra</button></div></div>`);
-}
-function saveOperationalInvoice(kind,id){
-  const section=kind==='acquisto'?'partite':'uscite';
-  if(!requirePermission(section,'update'))return;
-  const rec=operationalInvoiceRecord(kind,id);if(!rec){toast('Elemento non trovato','err');return;}
-  const numero=(document.getElementById('ofi_num')?.value||'').trim();
-  const data=document.getElementById('ofi_data')?.value||'';
-  if(!numero||!data){toast('Inserisci numero e data della fattura','err');return;}
-
-  const key=operationalInvoiceKey(kind);
-  const before=JSON.parse(JSON.stringify(rec[key]||[]));
-  rec[key]=[...(rec[key]||[]),{
-    id:'ofi_'+Date.now().toString(36),
-    numero,
-    data,
-    createdAt:Date.now(),
-    createdBy:CLOUD.user?.uid||''
-  }];
-  if(!save()){
-    rec[key]=before;
-    toast('Impossibile salvare la fattura','err');
-    return;
-  }
-  closeModal();
-  if(kind==='acquisto') render(); else openDocViewOperational(id);
-  toast('Fattura registrata');
-}
-
 /* ---------- DASHBOARD ---------- */
 function viewDash(){
-  if(FB_ON&&CLOUD.user&&!hasPermission('economics','read')) return viewDashOperational();
   const s = annoStats(YEAR);
   const ps = Object.values(DB.partite).filter(p=>p.anno===YEAR);
   const docs = Object.values(DB.documenti).filter(d=>(d.righe||[]).some(r=>DB.partite[r.partitaId]?.anno===YEAR));
@@ -1489,10 +746,7 @@ function viewDash(){
   const valuedDocs=docs.filter(uscitaValorizzata).length;
   const completion=docs.length?Math.round(valuedDocs/docs.length*100):0;
   const docsNoInvoice=docs.filter(d=>uscitaValorizzata(d)&&!String(documentoEconomicoUscita(d)?.numero||'').trim()).length;
-  const missingPurchase=ps.filter(p=>
-    !(partitaEconomicsData(p).fattureAcquisto||[])
-      .some(f=>(+f.importo||0)>0)
-  );
+  const missingPurchase=ps.filter(p=>!(p.fattureAcquisto||[]).some(f=>(+f.importo||0)>0));
   const hazardousStock=ps.filter(p=>giacenza(p)>0.01&&cerByCode[p.cer]?.hazard);
   const worked=ps.filter(p=>(p.lavorazioni||[]).length>0).length;
   const status={stock:0,partial:0,closed:0};
@@ -1586,7 +840,6 @@ function rowPartita(p){
 
 /* ---------- PARTITE LIST ---------- */
 function viewPartite(){
-  if(FB_ON&&CLOUD.user&&!hasPermission('economics','read')) return viewPartiteOperational();
   const ps = Object.values(DB.partite).filter(p=>p.anno===YEAR).sort((a,b)=>a.num-b.num);
   return `<div class="panel">
     <div class="panel-h"><h3>Registro partite ${YEAR}</h3><span class="cnt">${ps.length} partite</span><span class="sp"></span>
@@ -1615,10 +868,8 @@ function viewPartite(){
 
 /* ---------- PARTITA DETAIL ---------- */
 function viewPartitaDetail(){
-  if(FB_ON&&CLOUD.user&&!hasPermission('economics','read')) return viewPartitaDetailOperational();
   const p = DB.partite[ROUTE.id];
   if(!p) return emptyState('Partita non trovata','');
-  const ecoPartita = partitaEconomicsData(p);
   const e = partitaEconomics(p); const ekgI=eurokgIngresso(p); const g=giacenza(p);
   const prod = DB.produttori[p.produttoreId]||{};
   const lotti = lottiDisponibili(p);
@@ -1655,10 +906,11 @@ function viewPartitaDetail(){
       <!-- FATTURE ACQUISTO -->
       <div class="sec"><div class="sec-h"><h4>Fatture d'acquisto</h4><span class="sp"></span><button class="btn sm" onclick="openFattura('${p.id}')">+ Fattura</button></div>
       <div class="sec-b pad0">
-        ${(ecoPartita.fattureAcquisto||[]).length? `<table><thead><tr><th>N. fattura</th><th>Data</th><th>Importo</th><th></th></tr></thead><tbody>
-        ${(ecoPartita.fattureAcquisto||[]).map(f=>`<tr><td class="mono">${esc(f.numero||'—')}</td><td>${dfmt(f.data)}</td><td class="num">${eur(f.importo)}</td>
+        ${(p.fattureAcquisto||[]).length? `<table><thead><tr><th>N. fattura</th><th>Data</th><th>Importo</th><th>Allegati</th><th></th></tr></thead><tbody>
+        ${p.fattureAcquisto.map(f=>`<tr><td class="mono">${esc(f.numero||'—')}</td><td>${dfmt(f.data)}</td><td class="num">${eur(f.importo)}</td>
+          <td>${(f.pdf||[]).map(pf=>pf.url?`<a class="pill-file" href="${esc(pf.url)}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h9l5 5v15H6z" fill="none" stroke="currentColor" stroke-width="2"/></svg>${esc(pf.name)}</a>`:`<span class="pill-file" title="File non caricato nel cloud"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h9l5 5v15H6z" fill="none" stroke="currentColor" stroke-width="2"/></svg>${esc(pf.name)} · solo metadati</span>`).join('')||'<span class="mini">nessuno</span>'}</td>
           <td><button class="btn ghost sm" onclick="delFattura('${p.id}','${f.id}')">✕</button></td></tr>`).join('')}
-        <tr><td colspan="2" style="font-weight:600">Totale acquisto</td><td class="num" style="font-weight:600">${eur(costoAcquisto(p))}</td><td class="num">${ekg(ekgI)}</td></tr>
+        <tr><td colspan="2" style="font-weight:600">Totale acquisto</td><td class="num" style="font-weight:600">${eur(costoAcquisto(p))}</td><td colspan="2" class="num">${ekg(ekgI)}</td></tr>
         </tbody></table>`: `<div class="empty"><div class="big">Nessuna fattura</div>Collega una o più fatture per determinare il €/kg d'ingresso.</div>`}
       </div></div>
 
@@ -1712,7 +964,7 @@ function viewPartitaDetail(){
         ${prod.piva?`<div class="kv"><span class="k">P.IVA</span><span class="v mono">${esc(prod.piva)}</span></div>`:''}
         ${prod.indirizzo?`<div class="kv"><span class="k">Sede legale</span><span class="v" style="max-width:180px">${esc(prod.indirizzo)}</span></div>`:''}
         ${(p.formulariIngresso||[]).map(fo=>`<div class="kv"><span class="k">Formulario</span><span class="v mono">${esc(fo.numero)} · ${dfmt(fo.data)}</span></div>`).join('')}
-        ${ecoPartita.trasportoIngresso?`<div class="kv"><span class="k">Trasp. ingresso</span><span class="v">${eur(ecoPartita.trasportoIngresso.importo)}</span></div>`:''}
+        ${p.trasportoIngresso?`<div class="kv"><span class="k">Trasp. ingresso</span><span class="v">${eur(p.trasportoIngresso.importo)}</span></div>`:''}
       </div></div>
     </div>
   </div>`;
@@ -1736,7 +988,6 @@ function traceTree(p){
 
 /* ---------- USCITE ---------- */
 function viewUscite(){
-  if(FB_ON&&CLOUD.user&&!hasPermission('economics','read')) return viewUsciteOperational();
   const docs = Object.values(DB.documenti).filter(d=>{
     return (d.righe||[]).some(r=>{ const p=DB.partite[r.partitaId]; return p && p.anno===YEAR; });
   }).sort((a,b)=> new Date(b.data||0)-new Date(a.data||0));
@@ -1754,14 +1005,13 @@ function viewUscite(){
         <td class="num">${kg(rip.totKg)}</td>
         <td class="num" style="color:${rip.V<0?'var(--red)':'var(--green)'}">${uscitaValorizzata(d)?eur(rip.V):'—'}</td>
         <td>${documentoEconomicoUscita(d)?`<span class="mono">${esc(documentoEconomicoUscita(d).numero)}</span><br><span class="mini">${dfmt(documentoEconomicoUscita(d).data)}</span>`:'—'}</td>
-        <td>${uscitaValorizzata(d)?(naturaValorizzazione(d)==='costo'?'<span class="tag haz">costo / perdita</span>':(documentoEconomicoUscita(d)?'<span class="tag green">ricavo fatturato</span>':'<span class="tag brass">ricavo da fatturare</span>')):'<span class="tag amber">da valorizzare</span>'}</td></tr>`;
+        <td>${uscitaValorizzata(d)?(naturaValorizzazione(d)==='costo'?'<span class="tag haz">costo / perdita</span>':(d.fatturaCliente?'<span class="tag green">ricavo fatturato</span>':'<span class="tag brass">ricavo da fatturare</span>')):'<span class="tag amber">da valorizzare</span>'}</td></tr>`;
     }).join('')}</tbody></table>` : emptyState('Nessun documento di uscita','Crea un Annex VII o FIR e associa una o più partite.')}
   </div>`;
 }
 
 /* ---------- RIMANENZE ---------- */
 function viewRimanenze(){
-  if(FB_ON&&CLOUD.user&&!hasPermission('economics','read')) return viewRimanenzeOperational();
   const rows=[];
   Object.values(DB.partite).forEach(p=>{
     const g=giacenza(p); if(g>0.01){ const ekgI=eurokgIngresso(p); rows.push({p,g,ekgI,val:ekgI?g*ekgI:null}); }
@@ -1811,33 +1061,13 @@ function viewProduttori(){ return anagView('produttori','Produttori','produttore
 function viewTrasportatori(){ return anagView('trasportatori','Trasportatori','trasportatore'); }
 function anagView(store,titolo,kind){
   const rows=Object.values(DB[store]);
-  const canCreate=hasPermission(store,'create');
-  const canDelete=hasPermission(store,'delete');
   return `<div class="panel"><div class="panel-h"><h3>${titolo}</h3><span class="cnt">${rows.length}</span><span class="sp"></span>
-    ${canCreate?`<button class="btn primary sm" onclick="openAnag('${store}')">+ Nuovo</button>`:''}</div>
-  ${rows.length?`<table><thead><tr><th>Ragione sociale</th><th>P.IVA</th><th>Sede legale</th>${store==='trasportatori'?'<th>Tipo</th>':''}<th>VIES</th>${canDelete?'<th></th>':''}</tr></thead><tbody>
+    <button class="btn primary sm" onclick="openAnag('${store}')">+ Nuovo</button></div>
+  ${rows.length?`<table><thead><tr><th>Ragione sociale</th><th>P.IVA</th><th>Sede legale</th>${store==='trasportatori'?'<th>Tipo</th>':''}<th>VIES</th></tr></thead><tbody>
   ${rows.map(r=>`<tr><td style="font-weight:500">${esc(r.ragioneSociale)}</td><td class="mono">${esc(r.piva||'—')}</td>
     <td>${esc(r.indirizzo||'—')}</td>${store==='trasportatori'?`<td>${r.interno?'<span class="tag grey">interno</span>':'<span class="tag blue">esterno</span>'}</td>`:''}
-    <td>${r.vies?'<span class="tag green">verificata</span>':'<span class="tag grey">—</span>'}</td>${canDelete?`<td style="text-align:right"><button class="btn danger sm" onclick="deleteAnag('${store}','${r.id}')">Elimina</button></td>`:''}</tr>`).join('')}
+    <td>${r.vies?'<span class="tag green">verificata</span>':'<span class="tag grey">—</span>'}</td></tr>`).join('')}
   </tbody></table>`:emptyState('Nessuna anagrafica','Aggiungi il primo '+kind+'.')}</div>`;
-}
-function deleteAnag(store,id){
-  if(!requirePermission(store,'delete'))return;
-  const record=DB[store]?.[id];
-  if(!record){toast('Anagrafica non trovata','err');return;}
-  if(store==='produttori'){
-    const linked=Object.values(DB.partite).filter(p=>p.produttoreId===id);
-    if(linked.length){toast('Impossibile eliminare: produttore collegato a '+linked.length+' partite','err');return;}
-  }
-  if(store==='trasportatori'){
-    const linked=Object.values(DB.documenti).filter(d=>d.trasportatoreId===id);
-    if(linked.length){toast('Impossibile eliminare: trasportatore collegato a '+linked.length+' documenti','err');return;}
-  }
-  if(!window.confirm('Eliminare definitivamente '+(store==='produttori'?'questo produttore':'questo trasportatore')+'?'))return;
-  const snapshot=JSON.parse(JSON.stringify(record));
-  delete DB[store][id];
-  if(!save()){DB[store][id]=snapshot;return;}
-  render();toast('Anagrafica eliminata');
 }
 
 function emptyState(big,sub){ return `<div class="empty"><div class="big">${big}</div>${sub||''}</div>`; }
@@ -1994,8 +1224,7 @@ function lottoStoricoLabel(p,key){
 }
 function reportPartitaHtml(p,nested){
   const prod=DB.produttori[p.produttoreId]||{};
-  const ecoPartita=partitaEconomicsData(p);
-  const lavs=p.lavorazioni||[], formulari=p.formulariIngresso||[], fatture=ecoPartita.fattureAcquisto||[], definizioni=ecoPartita.definizioniFornitore||[];
+  const lavs=p.lavorazioni||[], formulari=p.formulariIngresso||[], fatture=p.fattureAcquisto||[], definizioni=p.definizioniFornitore||[];
   const disponibilita=lottiDisponibili(p).filter(l=>l.kg>0.01);
   const uscite=[];
   Object.values(DB.documenti).forEach(d=>{
@@ -2018,8 +1247,8 @@ function reportPartitaHtml(p,nested){
       ${formulari.map(f=>`<tr><td>Formulario ingresso</td><td class="mono">${esc(f.numero||'—')}</td><td>${dfmt(f.data)}</td><td>Produttore: ${esc(prod.ragioneSociale||'—')}</td></tr>`).join('')}
       ${fatture.map(f=>`<tr><td>Fattura fornitore</td><td class="mono">${esc(f.numero||'—')}</td><td>${dfmt(f.data)}</td><td>${eur(f.importo)}${(f.pdf||[]).length?' · '+(f.pdf||[]).map(x=>esc(x.name)).join(', '):''}</td></tr>`).join('')}
       ${definizioni.map(d=>`<tr><td>Definizione fornitore (${d.scope==='partita'?'intera partita':'quota'})</td><td class="mono">${esc(d.numeroDocumento||'—')}</td><td>${dfmt(d.dataDocumento)}</td><td>${kg(d.kg)} · ${ekg(d.prezzoKg)} · ${eur(d.importo)} · ${esc(d.riferimento||'')}</td></tr>`).join('')}
-      ${ecoPartita.trasportoIngresso?`<tr><td>Trasporto ingresso</td><td>—</td><td>—</td><td>${eur(ecoPartita.trasportoIngresso.importo)}</td></tr>`:''}
-      ${!formulari.length&&!fatture.length&&!definizioni.length&&!ecoPartita.trasportoIngresso?'<tr><td colspan="4">Nessun documento di ingresso o acquisto registrato.</td></tr>':''}
+      ${p.trasportoIngresso?`<tr><td>Trasporto ingresso</td><td>—</td><td>—</td><td>${eur(p.trasportoIngresso.importo)}</td></tr>`:''}
+      ${!formulari.length&&!fatture.length&&!definizioni.length&&!p.trasportoIngresso?'<tr><td colspan="4">Nessun documento di ingresso o acquisto registrato.</td></tr>':''}
     </tbody></table>
     <h3>Lavorazioni interne (${lavs.length})</h3>
     <table><thead><tr><th>Data</th><th>Tipo</th><th>Lotto origine</th><th>Kg lavorati</th><th>Risultato</th><th>Calo / scarto</th></tr></thead><tbody>
@@ -2101,25 +1330,6 @@ function downloadTraceReport(kind,id){
   toast('Report HTML scaricato');
 }
 
-
-function syncNow(){
-  if(!CLOUD.user){openCloudLogin();return;}
-  if(CLOUD.mode==='branches'){queueGranularSave();toast('Sincronizzazione multiutente avviata');return;}
-  if(CLOUD.mode==='legacy'&&isAdmin()){pushCloud();toast('Sincronizzazione avviata');return;}
-  toast('Sincronizzazione non disponibile in questo stato','err');
-}
-async function migrateToMultiuser(){
-  if(!isAdmin()||CLOUD.mode!=='legacy'){toast('Migrazione disponibile solo all’amministratore prima del passaggio multiutente','err');return;}
-  if(!window.confirm('Avviare la migrazione dell’archivio nelle nuove sezioni multiutente? Verifica di avere già esportato il backup JSON e il backup Firebase.'))return;
-  CLOUD.syncing=true;updateStoreStatus();
-  try{
-    const result=await window.firebaseBridge.migrateLegacyToBranches();
-    toast(`Migrazione completata: ${result.partite} partite e ${result.documenti} documenti`);
-    await syncBranchCloud();
-  }catch(e){toast('Migrazione non eseguita: '+String(e?.message||e),'err');}
-  finally{CLOUD.syncing=false;updateStoreStatus();}
-}
-
 /* ---------- BACKUP / SINCRONIZZAZIONE ---------- */
 function backupSummary(){return `${Object.keys(DB.partite||{}).length} partite · ${Object.keys(DB.documenti||{}).length} documenti · ${Object.keys(DB.produttori||{}).length} produttori`;}
 function openDataManager(){
@@ -2136,23 +1346,20 @@ function openDataManager(){
     <div class="row2">
       <button class="btn primary" onclick="exportBackup()">Scarica backup JSON</button>
       <button class="btn" onclick="chooseBackupFile()">Importa backup JSON</button>
-      <button class="btn" onclick="restorePreviousLocal()" ${localStorage.getItem(localKey(LS_PREV_KEY))?'':'disabled'}>Ripristina copia precedente</button>
-      ${FB_ON?(CLOUD.user?'<button class="btn" onclick="syncNow();closeModal()">Sincronizza ora</button>':'<button class="btn" onclick="openCloudLogin()">Accedi a Firebase</button>'):'<button class="btn" disabled>Configura Firebase per il cloud</button>'}${isAdmin()&&CLOUD.mode==='legacy'?'<button class="btn primary" onclick="closeModal();migrateToMultiuser()">Prepara archivio multiutente</button>':''}
+      <button class="btn" onclick="restorePreviousLocal()" ${localStorage.getItem(LS_PREV_KEY)?'':'disabled'}>Ripristina copia precedente</button>
+      ${FB_ON?(CLOUD.user?'<button class="btn" onclick="pushCloud();closeModal();toast(\'Sincronizzazione avviata\')">Sincronizza ora</button>':'<button class="btn" onclick="openCloudLogin()">Accedi a Firebase</button>'):'<button class="btn" disabled>Configura Firebase per il cloud</button>'}
     </div>
   </div>
   <div class="modal-f">${CLOUD.user?'<button class="btn ghost" onclick="cloudSignOut()">Disconnetti Firebase</button>':''}<button class="btn" onclick="closeModal()">Chiudi</button></div></div>`);
 }
 function exportBackup(){
-  if(!hasPermission('backup','manage')&&!isAdmin()){toast('Backup riservato all’amministratore','err');return;}
   const payload={format:'valmet-raee-backup',version:2,exportedAt:new Date().toISOString(),data:DB};
   const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup_registro_raee_'+new Date().toISOString().slice(0,10)+'.json';
   document.body.appendChild(a);a.click();a.remove();const href=a.href;setTimeout(()=>URL.revokeObjectURL(href),1000);toast('Backup JSON scaricato');
 }
-function chooseBackupFile(){
-  if(!hasPermission('backup','manage')&&!isAdmin()){toast('Import backup riservato all’amministratore','err');return;}closeModal();const input=document.getElementById('backupFile');input.value='';input.click();}
+function chooseBackupFile(){closeModal();const input=document.getElementById('backupFile');input.value='';input.click();}
 async function importBackupFile(input){
-  if(!hasPermission('backup','manage')&&!isAdmin()){toast('Import backup riservato all’amministratore','err');return;}
   const file=input.files&&input.files[0];if(!file)return;
   try{
     const parsed=JSON.parse(await file.text()), data=parsed&&parsed.format==='valmet-raee-backup'?parsed.data:parsed;
@@ -2163,8 +1370,7 @@ async function importBackupFile(input){
   finally{input.value='';}
 }
 function restorePreviousLocal(){
-  if(!hasPermission('backup','manage')&&!isAdmin()){toast('Ripristino riservato all’amministratore','err');return;}
-  const raw=localStorage.getItem(localKey(LS_PREV_KEY));if(!raw){toast('Nessuna copia precedente disponibile','err');return;}
+  const raw=localStorage.getItem(LS_PREV_KEY);if(!raw){toast('Nessuna copia precedente disponibile','err');return;}
   if(!window.confirm('Ripristinare la copia locale precedente? La situazione attuale diventerà a sua volta la copia di sicurezza.'))return;
   try{DB=normalizeDB(JSON.parse(raw));if(!save())return;closeModal();render();toast('Copia locale precedente ripristinata');}catch(e){toast('Copia precedente non leggibile','err');}
 }
@@ -2186,13 +1392,11 @@ async function cloudSignOut(){try{await window.firebaseBridge.signOut();closeMod
 
 /* ---------- AZZERA ARCHIVIO ---------- */
 function resetAll(){
-  if(!isAdmin()){toast('Azzeramento riservato all’amministratore','err');return;}
   modal(`<div class="modal"><div class="modal-h"><h3>Azzerare l'archivio?</h3><button class="x" onclick="closeModal()">×</button></div>
   <div class="modal-b"><p style="margin:0">Verranno eliminati <b>tutte le partite, i documenti e le anagrafiche</b> dalla copia locale${CLOUD.user?' e da Firebase':''}. Prima dell'operazione scarica un backup JSON.</p></div>
   <div class="modal-f"><button class="btn" onclick="exportBackup()">Scarica backup</button><span style="flex:1"></span><button class="btn ghost" onclick="closeModal()">Annulla</button><button class="btn danger" onclick="doReset()">Azzera tutto</button></div></div>`);
 }
 function doReset(){
-  if(!isAdmin()){toast('Azzeramento riservato all’amministratore','err');return;}
   DB=emptyDB();
   save(); closeModal(); go('dash'); toast('Archivio azzerato');
 }
@@ -2245,7 +1449,12 @@ function bindCerCombo(inputId, hiddenId){
     const opts=results.map((c,i)=>c.chap?null:i).filter(x=>x!=null);
     if(e.key==='ArrowDown'){e.preventDefault(); const p=opts.indexOf(hi); hi=opts[Math.min(p+1,opts.length-1)]??opts[0]; draw();}
     else if(e.key==='ArrowUp'){e.preventDefault(); const p=opts.indexOf(hi); hi=opts[Math.max(p-1,0)]??opts[0]; draw();}
-    else if(e.key==='Enter'){e.preventDefault(); if(hi>=0)pick(hi);}
+    else if(e.key==='Enter'){
+      e.preventDefault();
+      const exact=results.findIndex(c=>!c.chap&&c.code===inp.value.replace(/\s/g,''));
+      const choice=hi>=0?hi:(exact>=0?exact:opts[0]);
+      if(choice!=null)pick(choice);
+    }
     else if(e.key==='Escape'){wrap.classList.remove('open');}
   };
   document.addEventListener('click',e=>{ if(!wrap.contains(e.target)) wrap.classList.remove('open'); });
@@ -2293,7 +1502,6 @@ function applyVies(boxId, json){
 
 /* ---- NUOVA / ANAGRAFICA ---- */
 function openAnag(store, returnCb){
-  if(!requirePermission(store,'create'))return;
   const isTrasp = store==='trasportatori';
   modal(`<div class="modal"><div class="modal-h"><h3>Nuovo ${isTrasp?'trasportatore':'produttore'}</h3><button class="x" onclick="closeModal()">×</button></div>
   <div class="modal-b">
@@ -2312,7 +1520,6 @@ function openAnag(store, returnCb){
   const vb=document.getElementById('an_viesbox'); if(vb) vb.style.display='block';
 }
 function saveAnag(store){
-  if(!requirePermission(store,'create'))return;
   const interno = document.getElementById('an_int')?.checked;
   const rs=document.getElementById('an_rs')?.value.trim();
   if(!interno && !rs){ toast('Ragione sociale obbligatoria','err'); return; }
@@ -2326,7 +1533,6 @@ function saveAnag(store){
 
 /* ---- NUOVA PARTITA ---- */
 function openPartita(){
-  if(!requirePermission('partite','create'))return;
   const prods=Object.values(DB.produttori);
   const num=nextNum(YEAR);
   const today=new Date().toISOString().slice(0,10);
@@ -2352,14 +1558,9 @@ function openPartita(){
   document.getElementById('view')._after=null; bindCerCombo('pcer','pcer_val');
 }
 document.getElementById('view')._after=null;
-async function savePartita(anno){
-  if(!requirePermission('partite','create'))return;
+function savePartita(anno){
   anno=+anno||YEAR;
-  let num=nextNum(anno);
-  if(CLOUD.user&&CLOUD.mode==='branches'){
-    try{num=await window.firebaseBridge.nextCounter(anno);DB.counters[String(anno)]=num;}
-    catch(e){toast('Impossibile assegnare il progressivo della partita','err');return;}
-  }
+  const num=nextNum(anno);
   const cer=document.getElementById('pcer_val').value;
   const kgv=+document.getElementById('p_kg').value;
   const prod=document.getElementById('p_prod').value;
@@ -2373,18 +1574,13 @@ async function savePartita(anno){
   DB.partite[id]={ id, num, anno, cer, kgIngresso:kgv, produttoreId:prod,
     dataIngresso,
     formulariIngresso: form?[{numero:form,data:document.getElementById('p_formdata').value}]:[],
-    lavorazioni:[],
+    fattureAcquisto:[], definizioniFornitore:[], lavorazioni:[], trasportoIngresso:null,
     createdAt:Date.now() };
-  if(!save()){
-    delete DB.partite[id];
-    return;
-  }
-  closeModal(); go('partita',id); toast('Partita '+num+'-Raee registrata');
+  save(); closeModal(); go('partita',id); toast('Partita '+num+'-Raee registrata');
 }
 
 /* ---- MODIFICA PARTITA PRIMA DI LAVORAZIONI/USCITE ---- */
 function openEditPartita(partitaId){
-  if(!requirePermission('partite','update'))return;
   const p=DB.partite[partitaId];
   if(!p){ toast('Partita non trovata','err'); return; }
   if(!canEditPartita(p)){ toast('La partita non pu\u00f2 pi\u00f9 essere modificata: sono presenti lavorazioni o uscite','err'); return; }
@@ -2411,7 +1607,6 @@ function openEditPartita(partitaId){
   bindCerCombo('epcer','epcer_val');
 }
 function saveEditPartita(partitaId){
-  if(!requirePermission('partite','update'))return;
   const p=DB.partite[partitaId];
   if(!p){ toast('Partita non trovata','err'); return; }
   if(!canEditPartita(p)){ closeModal(); render(); toast('Modifica bloccata: nel frattempo la partita \u00e8 stata lavorata o fatta uscire','err'); return; }
@@ -2444,7 +1639,6 @@ function saveEditPartita(partitaId){
 
 /* ---- FATTURA ACQUISTO ---- */
 function openFattura(pid){
-  if(!requirePermission('economics','create'))return;
   modal(`<div class="modal"><div class="modal-h"><h3>Fattura d'acquisto</h3><button class="x" onclick="closeModal()">×</button></div>
   <div class="modal-b">
     <div class="row2">
@@ -2452,74 +1646,42 @@ function openFattura(pid){
       <div class="field"><label>Data</label><input class="inp" id="f_data" type="date"></div>
     </div>
     <div class="field"><label>Importo € <span class="req">*</span></label><input class="inp num" id="f_imp" type="number" min="0.01" step="0.01" placeholder="0.00"></div>
+    <div class="field"><label>Allegati PDF</label><input class="inp" id="f_pdf" type="file" accept="application/pdf" multiple>
+      <div class="hint">${CLOUD.user?'I PDF saranno caricati su Firebase Storage; nel backup locale resteranno nome e collegamento.':'Accedi a Firebase per archiviare anche il contenuto dei PDF. Senza cloud verranno conservati soltanto nome e dimensione.'}</div></div>
   </div>
   <div class="modal-f"><button class="btn ghost" onclick="closeModal()">Annulla</button><button class="btn primary" onclick="saveFattura('${pid}')">Aggiungi fattura</button></div></div>`);
 }
 async function saveFattura(pid){
-  if(!requirePermission('economics','create'))return;
-  const p=DB.partite[pid];
-  if(!p) return;
-
+  const p=DB.partite[pid]; if(!p)return;
   const num=document.getElementById('f_num').value.trim();
-  const data=document.getElementById('f_data').value;
   const imp=+document.getElementById('f_imp').value;
-  if(!num||!data){toast('Inserisci numero e data fattura','err');return;}
-  if(!Number.isFinite(imp)||imp<=0){
-    toast('Inserisci un importo d’acquisto valido maggiore di zero','err');
-    return;
+  if(!num){ toast('N. fattura obbligatorio','err'); return; }
+  if(!Number.isFinite(imp)||imp<=0){ toast('Inserisci un importo d’acquisto valido maggiore di zero','err'); return; }
+  const files=document.getElementById('f_pdf').files;
+  const pdf=[];let uploadWarning=false;
+  for(const file of files){
+    let url=null,path=null;
+    if(CLOUD.user&&window.firebaseBridge){
+      try{const safe=file.name.replace(/[^a-zA-Z0-9._-]+/g,'_');path=`registro-mozzanica/fatture/${pid}/${Date.now()}_${safe}`;url=await window.firebaseBridge.uploadFile(file,path);}
+      catch(e){uploadWarning=true;}
+    }else if(file.size)uploadWarning=true;
+    pdf.push({name:file.name,size:file.size,url,path,uploadedAt:url?Date.now():null});
   }
-
-  const eco=ensurePartitaEconomics(p);
-  eco.fattureAcquisto=eco.fattureAcquisto||[];
-  eco.fattureAcquisto.push({
-    id:uid('ft'),
-    numero:num,
-    data,
-    importo:imp
-  });
-
-  if(!save())return;
-  closeModal();
-  render();
-  toast('Fattura aggiunta');
+  p.fattureAcquisto=p.fattureAcquisto||[];
+  p.fattureAcquisto.push({id:uid('ft'),numero:num,data:document.getElementById('f_data').value,importo:imp,pdf});
+  save(); closeModal(); render(); toast(uploadWarning?'Fattura salvata; uno o più PDF restano solo come metadati':'Fattura aggiunta'+(pdf.length?' con PDF cloud':''),uploadWarning?'err':'');
 }
-function delFattura(pid,fid){
-  if(!requirePermission('economics','delete'))return;
-  const p=DB.partite[pid];
-  if(!p) return;
+function delFattura(pid,fid){ const p=DB.partite[pid]; p.fattureAcquisto=p.fattureAcquisto.filter(f=>f.id!==fid); save(); render(); }
 
-  const hadEconomics=!!DB.economics?.partite?.[pid];
-
-  const previousEconomics=hadEconomics
-    ? JSON.parse(JSON.stringify(DB.economics.partite[pid]))
-    : null;
-
-  const eco=ensurePartitaEconomics(p);
-
-  eco.fattureAcquisto=(eco.fattureAcquisto||[])
-    .filter(f=>f.id!==fid);
-
-  if(!save()){
-    if(hadEconomics){
-      DB.economics.partite[pid]=previousEconomics;
-    }else{
-      delete DB.economics.partite[pid];
-    }
-    return;
-  }
-
-  render();
-}
 /* ---- LAVORAZIONE ---- */
 let LAV_FRAZ=[];
 function openLavorazione(pid){
-  if(!requirePermission('partite','update'))return;
   const p=DB.partite[pid]; LAV_FRAZ=[];
   if(!p){ toast('Partita non trovata','err'); return; }
   const disponibili=lottiDisponibili(p).filter(l=>l.kg>0.01);
   if(!disponibili.length){ toast('Non ci sono quantit\u00e0 disponibili da lavorare','err'); return; }
   const first=disponibili[0];
-  modal(`<div class="modal"><div class="modal-h"><h3>Lavorazione interna</h3><button class="x" onclick="closeModal()">×</button></div>
+  modal(`<div class="modal lav-modal"><div class="modal-h"><h3>Lavorazione interna</h3><button class="x" onclick="closeModal()">×</button></div>
   <div class="modal-b">
     <div class="field"><label>Tipo lavorazione <span class="req">*</span></label>
       <select class="inp" id="l_tipo"><option value="trit">Triturazione</option><option value="cern">Selezione e cernita</option></select></div>
@@ -2561,7 +1723,6 @@ function addFraz(){
   bindCerCombo('fz_cer_'+i,'fz_cerval_'+i);
 }
 function saveLavorazione(pid){
-  if(!requirePermission('partite','update'))return;
   const p=DB.partite[pid];
   if(!p){ toast('Partita non trovata','err'); return; }
   const tipo=document.getElementById('l_tipo').value;
@@ -2576,14 +1737,18 @@ function saveLavorazione(pid){
   const lav={id:uid('lav'),tipo,data:document.getElementById('l_data').value,pesoPrima:prima,
     kgLavorati:prima,lottoOrigine:sourceKey,lottoOrigineLabel:source.label,cerOrigine:source.cer,partialV2:true};
   if(split){
-    const fraz=[];
+    const fraz=[]; let invalidCer=false;
     document.querySelectorAll('#l_frazlist .sec').forEach(sec=>{
       const i=sec.id.split('_')[1];
       const lab=document.getElementById('fz_lab_'+i)?.value.trim()||'Frazione';
       const fkg=+document.getElementById('fz_kg_'+i)?.value;
-      const fcer=document.getElementById('fz_cerval_'+i)?.value||source.cer;
+      const selectedCer=document.getElementById('fz_cerval_'+i)?.value;
+      const typedCer=document.getElementById('fz_cer_'+i)?.value.trim();
+      if(fkg>0&&typedCer&&!selectedCer)invalidCer=true;
+      const fcer=selectedCer||source.cer;
       if(fkg>0) fraz.push({id:lav.id+'_fr_'+i,label:lab,kg:fkg,cer:fcer});
     });
+    if(invalidCer){ toast('Seleziona un CER valido dall’elenco per ogni frazione compilata','err'); return; }
     if(!fraz.length){ toast('Aggiungi almeno una frazione','err'); return; }
     const totFraz=fraz.reduce((s,f)=>s+(+f.kg||0),0);
     if(totFraz>prima+0.001){ toast('Il peso totale delle frazioni supera i kg lavorati','err'); return; }
@@ -2601,7 +1766,6 @@ function saveLavorazione(pid){
   closeModal(); render(); toast('Lavorazione parziale registrata; residuo disponibile '+kg(Math.max(0,(lottiDisponibili(p).find(x=>x.key===sourceKey)?.kg||0))));
 }
 function delLavorazione(pid,lid){
-  if(!requirePermission('partite','update'))return;
   const p=DB.partite[pid], lav=p&&(p.lavorazioni||[]).find(l=>l.id===lid);
   if(!p || !lav){ toast('Lavorazione non trovata','err'); return; }
   const prodotti=(lav.frazioni&&lav.frazioni.length)?lav.frazioni.map(fr=>fr.id):[lav.lottoProdotto||lav.id+'_out'];
@@ -2626,16 +1790,15 @@ function containsReference(value,target,seen){
   return Object.values(value).some(v=>containsReference(v,target,seen));
 }
 function deletePartita(partitaId){
-  if(!requirePermission('partite','delete'))return;
   const p=DB.partite[partitaId];
   if(!p){ toast('Partita non trovata','err'); return; }
 
   const reasons=[];
   const docs=Object.values(DB.documenti).filter(d=>(d.righe||[]).some(r=>r.partitaId===partitaId));
   if((p.lavorazioni||[]).length) reasons.push('sono presenti lavorazioni interne');
-  if(docs.length) reasons.push('è utilizzata in '+docs.length+' document'+(docs.length===1?'o di uscita':'i di uscita'));
+  if(docs.length) reasons.push('\u00e8 utilizzata in '+docs.length+' document'+(docs.length===1?'o di uscita':'i di uscita'));
 
-  const otherStores=Object.keys(DB).filter(k=>!['partite','documenti','counters','economics'].includes(k) && containsReference(DB[k],partitaId));
+  const otherStores=Object.keys(DB).filter(k=>!['partite','documenti','counters'].includes(k) && containsReference(DB[k],partitaId));
   if(otherStores.length) reasons.push('esistono altri record collegati ('+otherStores.join(', ')+')');
 
   if(reasons.length){
@@ -2648,22 +1811,10 @@ function deletePartita(partitaId){
     return;
   }
 
-  if(!window.confirm('Stai per eliminare definitivamente questa partita, incluse fatture, formulari e trasporto di ingresso collegati. L\'operazione non è reversibile.')) return;
-
-  const hadEconomics=!!DB.economics?.partite?.[partitaId];
-  const previousEconomics=hadEconomics
-    ? JSON.parse(JSON.stringify(DB.economics.partite[partitaId]))
-    : null;
+  if(!window.confirm('Stai per eliminare definitivamente questa partita, incluse fatture, formulari e trasporto di ingresso collegati. L\'operazione non \u00e8 reversibile.')) return;
 
   delete DB.partite[partitaId];
-  if(hadEconomics) delete DB.economics.partite[partitaId];
-
-  if(!save()){
-    DB.partite[partitaId]=p;
-    if(hadEconomics) DB.economics.partite[partitaId]=previousEconomics;
-    return;
-  }
-
+  if(!save()){ DB.partite[partitaId]=p; return; }
   ROUTE={view:'partite',id:null};
   history.replaceState(null,'','#partite');
   render();
@@ -2673,7 +1824,6 @@ function deletePartita(partitaId){
 /* ---- DOCUMENTO DI USCITA ---- */
 let DOC_RIGHE=[];
 function openDocumento(existingId, preselectPid){
-  if(!requirePermission('uscite','create'))return;
   DOC_RIGHE=[];
   const trasp=Object.values(DB.trasportatori);
   // partite con giacenza > 0
@@ -2712,12 +1862,10 @@ function openDocumento(existingId, preselectPid){
   if(preselectPid){ const idx=disp.findIndex(x=>x.p.id===preselectPid); if(idx>=0){ const c=document.getElementById('sel_'+idx); if(c){c.checked=true; document.getElementById('kgwrap_'+idx).style.opacity='1';} } }
 }
 function saveDocumento(){
-  if(!requirePermission('uscite','create'))return;
   const num=document.getElementById('d_num').value.trim();
   const dest=document.getElementById('d_dest').value.trim();
   if(!num){ toast('N. documento obbligatorio','err'); return; }
   if(!dest){ toast('Destinatario obbligatorio','err'); return; }
-
   const righe=[];
   document.querySelectorAll('#d_disp .selrow').forEach((row,i)=>{
     const sel=document.getElementById('sel_'+i); if(!sel||!sel.checked)return;
@@ -2726,72 +1874,35 @@ function saveDocumento(){
     let kgv=saldo?max:+inp.value;
     if(!kgv||kgv<=0){ return; }
     if(kgv>max+0.001){ toast('Kg oltre la giacenza per '+DB.partite[sel.dataset.pid].num+'-Raee','err'); kgv=null; return; }
-    righe.push({id:uid('riga'),partitaId:sel.dataset.pid,lotto:sel.dataset.lot,kg:kgv,saldo});
+    righe.push({id:uid('riga'),partitaId:sel.dataset.pid, lotto:sel.dataset.lot, kg:kgv, saldo});
   });
-
   if(!righe.length){ toast('Seleziona almeno una partita con kg validi','err'); return; }
-
   const traspId=document.getElementById('d_trasp').value;
   const interno=traspId&&DB.trasportatori[traspId]?DB.trasportatori[traspId].interno:false;
   const id=uid('doc');
-
-  DB.documenti[id]={
-    id,
-    tipo:document.getElementById('d_tipo').value,
-    numero:num,
-    data:document.getElementById('d_data').value,
-    destinatario:dest,
-    trasportatoreId:traspId||null,
-    trasportoInterno:!!interno,
-    righe,
-    createdAt:Date.now()
-  };
-
-  const createEconomics=canMutateSection('economics','create');
-
-  if(createEconomics){
-    DB.economics=DB.economics||{};
-    DB.economics.documenti=DB.economics.documenti||{};
-    DB.economics.documenti[id]={
-      trasportoCosto:interno?0:(+document.getElementById('d_tcost').value||0),
-      valorizzazione:null,
-      naturaEconomicaBozza:'ricavo',
-      fatturaCliente:null,
-      fatturaCosto:null
-    };
-  }
-
-  if(!save()){
-    delete DB.documenti[id];
-    if(createEconomics) delete DB.economics.documenti[id];
-    return;
-  }
-
-  closeModal();
-  openDocView(id);
-  toast('Documento creato');
+  DB.documenti[id]={ id, tipo:document.getElementById('d_tipo').value, numero:num,
+    data:document.getElementById('d_data').value, destinatario:dest,
+    trasportatoreId:traspId||null, trasportoInterno:!!interno,
+    trasportoCosto:interno?0:(+document.getElementById('d_tcost').value||0),
+    righe, valorizzazione:null, naturaEconomicaBozza:'ricavo', fatturaCliente:null, fatturaCosto:null, createdAt:Date.now() };
+  save(); closeModal(); openDocView(id); toast('Documento creato');
 }
 
 /* ---- VISTA DOCUMENTO + VALORIZZAZIONE ---- */
 function openDocView(id){
-if(FB_ON&&CLOUD.user&&!hasPermission('economics','read')){openDocViewOperational(id);return;}
-const d=DB.documenti[id];
-if(!d) return;
-
-const eco=documentoEconomicsData(d);
-const rip=ripartizioneDoc(d);
-const natura=naturaValorizzazione(d);
-const docEco=documentoEconomicoUscita(d);
+  const d=DB.documenti[id]; if(!d)return;
+  const rip=ripartizioneDoc(d);
+  const natura=naturaValorizzazione(d), docEco=documentoEconomicoUscita(d);
   modal(`<div class="modal wide"><div class="modal-h"><h3><span class="tag ${d.tipo==='fir'?'grey':'brass'}">${d.tipo==='fir'?'FIR':'Annex VII'}</span> ${esc(d.numero)}</h3><button class="x" onclick="closeModal()">×</button></div>
   <div class="modal-b">
     <div class="row"><div class="det-head" style="margin:0 0 16px">
-      <div class="meta"><div class="row" style="margin:0"><span>Data <b>${dfmt(d.data)}</b></span><span>Destinatario <b>${esc(d.destinatario)}</b></span>${d.trasportatoreId?`<span>Trasporto <b>${esc(DB.trasportatori[d.trasportatoreId]?.ragioneSociale||'')}</b> ${d.trasportoInterno?'(interno)':eur(eco.trasportoCosto)}</span>`:''}</div></div>
+      <div class="meta"><div class="row" style="margin:0"><span>Data <b>${dfmt(d.data)}</b></span><span>Destinatario <b>${esc(d.destinatario)}</b></span>${d.trasportatoreId?`<span>Trasporto <b>${esc(DB.trasportatori[d.trasportatoreId]?.ragioneSociale||'')}</b> ${d.trasportoInterno?'(interno)':eur(d.trasportoCosto)}</span>`:''}</div></div>
     </div></div>
 
     <div class="sec"><div class="sec-h"><h4>Valorizzazione economica dell'uscita</h4></div><div class="sec-b">
       <div class="row2">
         <div class="field"><label>Natura economica</label><select class="inp" id="v_natura" data-original="${natura}" onchange="updateValorizzazioneNatura()"><option value="ricavo" ${natura==='ricavo'?'selected':''}>Ricavo (+)</option><option value="costo" ${natura==='costo'?'selected':''}>Costo / perdita (−)</option></select></div>
-        <div class="field"><label>Importo €</label><input class="inp num" id="v_val" type="number" min="0.01" step="0.01" value="${uscitaValorizzata(d)?Math.abs(+eco.valorizzazione.valoreRiconosciuto):''}" placeholder="da inserire per chiudere la posizione"></div>
+        <div class="field"><label>Importo €</label><input class="inp num" id="v_val" type="number" min="0.01" step="0.01" value="${uscitaValorizzata(d)?Math.abs(+d.valorizzazione.valoreRiconosciuto):''}" placeholder="da inserire per chiudere la posizione"></div>
       </div>
       <div class="row2">
         <div class="field"><label id="v_fnum_label">${natura==='costo'?'N. fattura costo / impianto':'N. fattura cliente'}</label><input class="inp mono" id="v_fnum" value="${esc(docEco?.numero||'')}" placeholder="es. FV 125/2026"></div>
@@ -2819,133 +1930,46 @@ function updateValorizzazioneNatura(){
   if(hint) hint.textContent=(costo?'L’importo sarà registrato con segno negativo e ridurrà il risultato economico.':'L’importo sarà registrato con segno positivo.')+' Puoi salvare anche il solo numero di fattura; la quota resterà da definire finché non inserirai l’importo.';
 }
 function saveValor(id){
-  if(!requirePermission('economics','update'))return;
-  const d=DB.documenti[id];
-
-  if(!d){
-    toast('Documento non trovato','err');
-    return;
-  }
-
+  const d=DB.documenti[id]; if(!d){ toast('Documento non trovato','err'); return; }
   const rawVal=document.getElementById('v_val').value.trim();
-  const v=rawVal==='' ? null : +rawVal;
-  const natura=document.getElementById('v_natura').value==='costo'
-    ? 'costo'
-    : 'ricavo';
-
+  const v=rawVal===''?null:+rawVal;
+  const natura=document.getElementById('v_natura').value==='costo'?'costo':'ricavo';
   const fnum=document.getElementById('v_fnum').value.trim();
   const fdata=document.getElementById('v_fdata').value;
-
   const hasVal=Number.isFinite(v)&&v>0;
+  if(rawVal!==''&&!hasVal){ toast('Inserisci un importo valido maggiore di zero','err'); return; }
+  if(!hasVal&&!fnum){ toast('Inserisci almeno il valore economico oppure il numero della fattura','err'); return; }
+  if(!fnum&&fdata){ toast('Per registrare la data indica anche il numero della fattura','err'); return; }
 
-  if(rawVal!==''&&!hasVal){
-    toast('Inserisci un importo valido maggiore di zero','err');
-    return;
-  }
-
-  if(!hasVal&&!fnum){
-    toast(
-      'Inserisci almeno il valore economico oppure il numero della fattura',
-      'err'
-    );
-    return;
-  }
-
-  if(!fnum&&fdata){
-    toast(
-      'Per registrare la data indica anche il numero della fattura',
-      'err'
-    );
-    return;
-  }
-
-  const hadEconomics=!!DB.economics?.documenti?.[id];
-
-  const previousEconomics=hadEconomics
-    ? JSON.parse(JSON.stringify(DB.economics.documenti[id]))
-    : null;
-
-  const eco=ensureDocumentoEconomics(d);
-
-  eco.valorizzazione=hasVal
-    ? {
-        valoreRiconosciuto:Math.abs(v),
-        natura
-      }
-    : null;
-
-  eco.naturaEconomicaBozza=natura;
-
-  eco.fatturaCliente=
-    natura==='ricavo'&&fnum
-      ? {
-          numero:fnum,
-          data:fdata
-        }
-      : null;
-
-  eco.fatturaCosto=
-    natura==='costo'&&fnum
-      ? {
-          numero:fnum,
-          data:fdata
-        }
-      : null;
-
-  if(!save()){
-    if(hadEconomics){
-      DB.economics.documenti[id]=previousEconomics;
-    }else{
-      delete DB.economics.documenti[id];
-    }
-
-    return;
-  }
-
-  openDocView(id);
-  render();
-
-  toast(
-    hasVal
-      ? (
-          natura==='costo'
-            ? 'Costo di uscita registrato'
-            : 'Ricavo di uscita registrato'
-        )
-      : 'Numero fattura salvato: uscita ancora da valorizzare'
-  );
+  const oldVal=d.valorizzazione?JSON.parse(JSON.stringify(d.valorizzazione)):null;
+  const oldCliente=d.fatturaCliente?JSON.parse(JSON.stringify(d.fatturaCliente)):null;
+  const oldCosto=d.fatturaCosto?JSON.parse(JSON.stringify(d.fatturaCosto)):null;
+  const oldNatura=d.naturaEconomicaBozza;
+  d.valorizzazione=hasVal?{valoreRiconosciuto:Math.abs(v),natura}:null;
+  d.naturaEconomicaBozza=natura;
+  d.fatturaCliente=natura==='ricavo'&&fnum?{numero:fnum,data:fdata}:null;
+  d.fatturaCosto=natura==='costo'&&fnum?{numero:fnum,data:fdata}:null;
+  if(!save()){ d.valorizzazione=oldVal; d.naturaEconomicaBozza=oldNatura; d.fatturaCliente=oldCliente; d.fatturaCosto=oldCosto; return; }
+  openDocView(id); render();
+  toast(hasVal?(natura==='costo'?'Costo di uscita registrato':'Ricavo di uscita registrato'):'Numero fattura salvato: uscita ancora da valorizzare');
 }
 function deleteDocumento(documentoId){
-  if(!requirePermission('uscite','delete'))return;
   const d=DB.documenti[documentoId];
   if(!d){ toast('Documento non trovato','err'); return; }
-  if(!window.confirm('Stai per eliminare definitivamente questo documento di uscita. Le quantità delle partite coinvolte torneranno disponibili. L\'operazione non è reversibile.')) return;
-
-  const hadEconomics=!!DB.economics?.documenti?.[documentoId];
-  const previousEconomics=hadEconomics
-    ? JSON.parse(JSON.stringify(DB.economics.documenti[documentoId]))
-    : null;
+  if(!window.confirm('Stai per eliminare definitivamente questo documento di uscita. Le quantit\u00e0 delle partite coinvolte torneranno disponibili. L\'operazione non \u00e8 reversibile.')) return;
 
   /* Giacenze, ricavi, utili e valorizzazioni sono calcolati dai documenti presenti:
-     rimuovendo il record operativo e quello economics vengono ripristinati e ricalcolati automaticamente. */
+     rimuovendo il record vengono quindi ripristinati e ricalcolati automaticamente. */
   delete DB.documenti[documentoId];
-  if(hadEconomics) delete DB.economics.documenti[documentoId];
-
-  if(!save()){
-    DB.documenti[documentoId]=d;
-    if(hadEconomics) DB.economics.documenti[documentoId]=previousEconomics;
-    return;
-  }
-
+  if(!save()){ DB.documenti[documentoId]=d; return; }
   closeModal();
   render();
-  toast('Documento eliminato e quantità ripristinate');
+  toast('Documento eliminato e quantit\u00e0 ripristinate');
 }
 
 /* ---------- INIT ---------- */
+load();
 if(location.hash){ const [v,id]=location.hash.slice(1).split('/'); ROUTE={view:v||'dash',id:id||null}; }
-if(!FB_ON) load();
-else DB=emptyDB();
 render();
 if(window.firebaseBridge)initCloudBridge();
 
